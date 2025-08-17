@@ -1,0 +1,183 @@
+Reading core Python source files from the original project to map features and gaps. Here’s a focused, skimmable deep-dive mapping the original Python project to what you have now, plus a priority roadmap. No code touched yet.
+
+## 1. What you gave me (core Python moving parts)
+
+Primary Python abstractions relevant to parity:
+- SimpleCerebrosRandomSearch: Orchestrates search (architecture sampling + multiple tries per architecture + ranking by metric + persistence directories).
+- DenseAutoMlStructuralComponent: Holds skip-connection / predecessor affinity parameters (first/main factors, decay function, rounding rules, min/max skip depth, seed).
+- DenseLateralConnectivity: Manages lateral connection probability, decay, gating logic, consecutive lateral/gated counters.
+- Units / Levels (InputUnit, FinalDenseUnit, etc.): Provide structural identity and output shaping.
+- NeuralNetworkFuture / RealNeuronNeuralNetworkFuture: Future-like container for asynchronous build/train? (not yet reviewed in detail, but used by search to instantiate candidates).
+- Decay/gate helpers: zero_7_exp_decay, zero_95_exp_decay, simple_sigmoid.
+- Multiple architecture “moieties” concept: number_of_architecture_moities_to_try × number_of_tries_per_architecture_moity.
+- Ranking direction & metric_to_rank_by (e.g., minimize MSE or maximize accuracy).
+- Some optional features in examples: graph visualization, project directories, checkpointing best model path, gating after N lateral connections.
+
+## 2. Current Elixir implementation snapshot
+
+You already have:
+- Spec generation (`Cerebros.Architecture.Spec.random/2`) with min/max levels, units, neurons.
+- Connectivity builder (deterministic; includes skip-depth affinity factors & lateral probability, but currently:
+  - No explicit rounding rule options (ceil/floor).
+  - No gating of lateral connections (placeholder gating semantics absent).
+  - No probability-based sampling across multiple predecessor depths (it samples via factors but not fully mirroring Python per-depth decay semantics with rounding rule selection).
+- Orchestrator (`Cerebros.Training.Orchestrator`) handling:
+  - Concurrency.
+  - number_of_architectures_to_try × number_of_trials_per_architecture (maps fairly directly).
+  - Basic result collection.
+- Trial execution with loop training, captures validation loss.
+- Minimal metric support (MSE) and simple improvement reporting.
+- Random seed injection per (arch_idx, trial_idx).
+- Mix tasks (if you keep them) for CLI runs.
+
+Missing vs Python design (grouped):
+
+### Architecture / Spec Parity
+- Rounding rules: predecessor_level_connection_affinity_factor_first_rounding_rule, predecessor_level_connection_affinity_factor_main_rounding_rule.
+- Distinct decay function fields (you have one main affinity decay, but Python semantics include per-depth scaling for non-first-level ancestors).
+- Support for real neuron variant (RealNeuronNeuralNetworkFuture) features (dendrites, gating) only partially scaffolded; gating missing.
+- Multiple input units treated specially: original multiplies input connections by factor * num_inputs (with replacement). Your builder currently samples predecessor-level units but does not replicate “with replacement scaled by factor * n_inputs” semantics exactly for first layer.
+
+### Lateral Connectivity & Gating
+- Consecutive lateral connection counters.
+- Probabilistic lateral connection selection using p_lateral_connection * decay(k_minus_n).
+- Gating layer insertion after N ungated lateral connections (in Python: gate_or_not + gate_activation_function).
+- num_lateral_connection_tries_per_unit logic (retry attempts).
+- Probability-based lateral selection vs your deterministic reduce with single probability check per potential earlier unit.
+
+### Search Process / Ranking / Directionality
+- direction (minimize / maximize) and metric_to_rank_by (e.g., "rmse", "accuracy").
+- Distinction between architecture sampling stage and trial repeats per architecture with ranking across both.
+- Keeping best model path / saving model architecture JSON (original creates directories).
+- Early stopping (you have patience parameter placeholder in Python; Elixir side not yet implementing early stop inside training loop—only epochs fixed).
+
+### Persistence / Repro / Metadata
+- Project directory scaffolding (models, model_graphs, model_architectures).
+- On-disk recording of each architecture spec & connectivity shape (simple JSON).
+- Reproducibility test harness (architectures equality given same seeds) — partially present (you test seeds manually; could formalize).
+
+### Visualization / Export
+- Graph visualization (optional).
+- Architecture + connectivity export with gating info.
+
+### Extended Unit Types
+- FinalDenseUnit vs general dense vs possible “real neuron” functionality. You have some dendrite scaffold but not exercised.
+
+## 3. Gap Prioritization (Pragmatic Roadmap)
+
+Priority 0 (Keep Fast & Lean – what to NOT do yet)
+- Don’t implement full directory project/persistence layer until you need experiment reproducibility outside ephemeral runs.
+- Don’t over-engineer a generic plugin metric system; simple mapping suffices.
+
+Priority 1 (Low-effort, high compatibility)
+1. Add rounding rule options (ceil/floor) on predecessor connection counts.
+2. Split decay functions: one for first-level? (Python keeps first separate as factor_first, plus general decay for deeper ancestors.)
+3. Support direction & metric_to_rank_by fields in orchestrator result summary (default :min on :validation_loss).
+4. Provide small helper: `Cerebros.Search.rank(results, metric: :validation_loss, direction: :min)` returning {best, sorted}.
+
+Priority 2 (Core lateral & gating semantics)
+5. Implement lateral connection probability selection mirroring Python:
+   - For each candidate left-side unit k_minus_n away, compute probability = p_lateral_connection * p_decay(distance).
+   - Honor max_consecutive_lateral_connections; reset logic.
+6. Add gating after N ungated laterals: if triggered, mark that lateral connection as gated (store in gated_laterals list).
+7. Add num_lateral_connection_tries_per_unit (loop attempts; break early if no more probability success).
+8. Export gating metadata in connectivity map.
+
+Priority 3 (Search replication fidelity)
+9. Distinguish “architecture moiety” (a sampled (levels, units per level, neurons per unit tuple) reused across multiple tries).
+10. Modify orchestrator: generate architectures first, then for each architecture run number_of_trials_per_architecture times, keeping best architecture trial-level summary.
+11. Add seed base for each architecture moiety and derived seed per trial for reproducibility.
+
+Priority 4 (Persistence / reproducibility)
+12. Optional output_dir config: auto-create (models/, specs/, connectivity/).
+13. Save spec JSON, connectivity JSON, and final metrics per trial.
+14. Provide `mix cerebros.nas.run --save` toggle to enable persistence.
+
+Priority 5 (Metrics expansion / early stop)
+15. Add optional MAE (absolute error) and maybe R² metric.
+16. Implement basic early stopping: monitor chosen metric; stop if no improvement for patience epochs (but you currently run all epochs—would need loop wrapper).
+17. Provide summary table at end (best per architecture, overall best).
+
+Priority 6 (Visualization / extras)
+18. Stub function returning adjacency list / GraphViz DOT to mirror graph export potential.
+19. Optional gating / lateral stats summary.
+
+## 4. Mapping Table (conceptual)
+
+Python -> Elixir (current or planned)
+- SimpleCerebrosRandomSearch -> `Cerebros.Training.Orchestrator` (+ future `Cerebros.Search` helper module for ranking/persistence)
+- DenseAutoMlStructuralComponent fields ->
+  - skip depths, affinity factors, decay -> `connectivity_config` fields (need rounding rules + deeper ancestor iteration fidelity)
+- DenseLateralConnectivity ->
+  - lateral_* fields -> partially in `connectivity_config`, need probability + gating state machine logic
+- Unit / InputUnit / FinalDenseUnit -> maps to simple maps inside `levels.units` (final vs non-final flag already)
+- Decay functions (zero_7_exp_decay, zero_95_exp_decay) -> anonymous functions in config (already using functions, but not the exact shapes)
+- simple_sigmoid gate -> implement gating via Axon.sigmoid later when gating logic added
+- number_of_architecture_moities_to_try, number_of_tries_per_architecture_moity -> `number_of_architectures_to_try`, `number_of_trials_per_architecture` (rename matches reasonably)
+- Ranking by metric/direction -> missing (currently just print best by validation_loss)
+- Persistence (directories) -> missing
+- Graph charting -> not implemented
+
+## 5. Design Adjustments (When implementing lateral + gating)
+
+Proposed struct additions:
+- connectivity_config add keys:
+  - :p_lateral_connection (current lateral_connection_probability)
+  - :p_lateral_connection_decay (function)
+  - :max_consecutive_lateral_connections (already)
+  - :gate_after_n_lateral_connections (already)
+  - :num_lateral_connection_tries_per_unit (integer, default 1)
+  - :gate_activation (atom, default :sigmoid)
+
+Connectivity builder changes:
+- Maintain per-level building state struct: %{consecutive: count, consecutive_ungated: count}.
+- Iterate candidate earlier units (left to right): compute probability dynamically.
+- If gating triggered, add to gated_laterals list; else normal lateral.
+- Ensure deterministic reproducibility by seeding RNG at start with trial seed and using uniform draws in fixed order (so probability-based still deterministic).
+
+## 6. Rounding Rules
+
+Add options:
+- :predecessor_first_rounding_rule (ceil | floor)
+- :predecessor_main_rounding_rule (ceil | floor)
+
+Implementation: after computing raw_count = factor * n_units * decay(depth), apply rounding function, ensure >=1.
+
+## 7. Search Ranking & Direction
+
+Add small pure function:
+```
+def rank_trials(trials, metric, direction) do
+  metric_fn = &Map.get(&1, metric) || get_in(&1, [:final_metrics, to_string(metric)])
+  sorter = case direction do :min -> &<=/2; :max -> &>=/2 end
+  Enum.sort_by(trials, metric_fn, case direction do :min -> :asc; :max -> :desc end)
+end
+```
+Then pick hd(sorted).
+
+## 8. Quick Wins You Can Greenlight Immediately (No heavy refactor)
+If you say “go” I can implement ONLY these first:
+1. Add ranking helper & integrate into final summary (direction configurable; default :min).
+2. Add rounding rule options (plumb through spec.random & orchestrator config).
+3. Prepare lateral + gating config fields (no logic yet) so future change doesn’t break external API.
+
+(Estimated: small patch, low risk.)
+
+## 9. Validation Strategy Once We Implement
+- Unit tests (lightweight) for:
+  - Rounding rules producing expected min connection count.
+  - Ranking helper direction both :min and :max.
+- Connectivity builder: property test (each non-input unit has at least 1 predecessor).
+- Determinism: given seed, connectivity and spec hash stable.
+
+## 10. What I Need From You Before Touching Code
+Just choose one of:
+A. Proceed with Priority 1 quick wins (ranking + rounding + config scaffolding).
+B. Jump straight to implementing full lateral probability + gating (Priority 2) in same pass.
+C. Delay all; keep reading more Python modules (I can inspect `units.py`, `neural_network_future.py` next and refine).
+D. Remove previously added Mix tasks (if you want ultra-minimal surface before proceeding).
+E. Something else (describe).
+
+Let me know the letter (or combo like “A then B”) and I’ll execute only that scope.
+
+Your call—what’s next?

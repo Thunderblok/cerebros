@@ -1,0 +1,38 @@
+# Elixir / Mix build artifacts
+/_build/
+/cover/
+/deps/
+/.elixir_ls/
+/erl_crash.dump
+/*.ez
+/doc/
+/priv/plts/
+
+# IDE/editor
+*.swp
+*.swo
+*.orig
+*~
+/.idea/
+/.vscode/
+
+# OS / misc
+.DS_Store
+Thumbs.db
+
+# Generated / cache
+/.nx
+/.cache
+
+# Local scripts outputs (if any)
+/tmp/
+
+# Ignore Python reference folder (user requested to ignore)
+/cerebros-core-algorithm-alpha-main/
+
+# Node / JS (if ever added)
+/node_modules/
+
+# Environment files
+.env
+.env.*

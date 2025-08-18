@@ -141,17 +141,23 @@ defmodule Cerebros.Training.TrialWorker do
 
     {est_params, estimation_strategy} =
       case estimation_mode do
-        :skip -> {0, :skip}
+        :skip ->
+          # Even in skip mode, do a cheap approximate count if we have a budget to allow early pruning
+          if param_budget do
+            {approximate_parameter_count(spec), :approximate_skip_for_budget}
+          else
+            {0, :skip}
+          end
         :approximate -> {approximate_parameter_count(spec), :approximate}
         :auto ->
           # Heuristic: approximate for larger specs (many units) otherwise full
           summary = spec_to_summary(spec)
           total_units = summary.total_units
-            if total_units > 50 do
-              {approximate_parameter_count(spec), :approximate_auto}
-            else
-              {estimate_parameter_count(model, spec), :full_auto}
-            end
+          if total_units > 50 do
+            {approximate_parameter_count(spec), :approximate_auto}
+          else
+            {estimate_parameter_count(model, spec), :full_auto}
+          end
         :full -> {estimate_parameter_count(model, spec), :full}
         other ->
           Logger.warning("Unknown parameter_estimation_mode=#{inspect(other)} falling back to :full")
@@ -199,88 +205,141 @@ defmodule Cerebros.Training.TrialWorker do
           train_data_full
         end
 
-      # Step 4: Compile the training loop
+      # Step 4: Compile the training loop (with compile time budget if wall clock timeout finite)
       compile_start = System.monotonic_time(:millisecond)
-      loop = Builder.compile_model(model, training_config)
-      compile_end = System.monotonic_time(:millisecond)
-      if Map.get(training_config, :debug_performance, false) do
-        Logger.info("[perf][trial #{trial_id}] compile_time_ms=#{compile_end - compile_start}")
-      end
-
-      # Step 5: Run training
-      Logger.info("Starting training for trial #{trial_id}")
-      training_start = System.monotonic_time(:millisecond)
-
-      configured_loop =
-  loop
-  |> Axon.Loop.validate(model, val_data)
-  |> maybe_attach_early_stop(training_config)
-  |> Axon.Loop.checkpoint(event: :epoch_completed, filter: [every: 10])
-
-      original_epochs = Map.get(training_config, :epochs, 50)
-      epochs = adapt_epochs(original_epochs, est_params, training_config)
-      if epochs != original_epochs do
-        Logger.info("Trial #{trial_id}: reducing epochs from #{original_epochs} -> #{epochs} (est_params=#{est_params})")
-      end
-
-      initial_state = %Axon.ModelState{data: %{}}
       timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
-      final_params =
-        if timeout_ms == :infinity do
-          Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs)
-        else
-          task = Task.async(fn -> Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs) end)
-          case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-            {:ok, params} -> params
-            nil -> raise "Trial #{trial_id} exceeded wall clock timeout #{timeout_ms}ms"
-            {:exit, reason} -> raise reason
-          end
-        end
-      training_end = System.monotonic_time(:millisecond)
-      training_time = training_end - training_start
-      Logger.info("Training completed for trial #{trial_id} in #{training_time}ms")
-      if Map.get(training_config, :debug_performance, false) do
-        Logger.info("[perf][trial #{trial_id}] training_time_ms=#{training_time} epochs_trained=#{epochs} batches_per_epoch=#{Map.get(training_config, :max_batches_per_epoch, :all)}")
-      end
-
-      # Step 6: Evaluate
-      eval_start = System.monotonic_time(:millisecond)
-      final_metrics = evaluate_model(model, final_params, val_data, training_config)
-      eval_end = System.monotonic_time(:millisecond)
-      if Map.get(training_config, :debug_performance, false) do
-        Logger.info("[perf][trial #{trial_id}] evaluation_time_ms=#{eval_end - eval_start}")
-      end
-
-      validation_loss =
-        case Map.get(final_metrics, "mean_squared_error") || Map.get(final_metrics, :mean_squared_error) do
-          %Nx.Tensor{} = t -> Nx.to_number(t)
-          v when is_number(v) -> v
-          _ -> nil
+      compile_budget_ms =
+        case timeout_ms do
+          :infinity -> :infinity
+          ms when is_integer(ms) and ms > 5_000 ->
+            # Reserve at least 1s for training/eval; use up to 30% of wall clock for compile
+            budget = trunc(min(ms * 0.30, ms - 1_000))
+            max(budget, 5_000)
+          _ -> 5_000
         end
 
-      %{
-        trial_id: trial_id,
-        architecture: spec_to_summary(spec),
-        training_time_ms: training_time,
-  # epochs_trained already included below; omit duplicate to silence warning
-        training_metrics: %{},
-        final_metrics: final_metrics,
-        validation_loss: validation_loss,
-        model_size: count_parameters(final_params),
-        spec_hash: spec_hash(spec),
-        completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-        estimated_parameters: est_params,
-        parameter_estimation_strategy: estimation_strategy,
-        epochs_requested: original_epochs,
-        epochs_trained: epochs,
-        phases_ms: %{
-          build_model: t_after_build - phase_t0,
-          parameter_estimation: t_after_param_estimation - t_after_build,
-          compile: compile_end - compile_start,
-          training: training_end - training_start,
-          evaluation: eval_end - eval_start
+      loop =
+        case compile_budget_ms do
+          :infinity -> Builder.compile_model(model, training_config)
+          b when is_integer(b) ->
+            task = Task.async(fn -> Builder.compile_model(model, training_config) end)
+            case Task.yield(task, b) || Task.shutdown(task, :brutal_kill) do
+              {:ok, compiled} -> compiled
+              nil -> :compile_timeout
+              {:exit, reason} ->
+                Logger.warning("Trial #{trial_id} compile task exited: #{inspect(reason)}")
+                :compile_failed
+            end
+        end
+      compile_end = System.monotonic_time(:millisecond)
+      compile_time = compile_end - compile_start
+      if Map.get(training_config, :debug_performance, false) do
+        Logger.info("[perf][trial #{trial_id}] compile_time_ms=#{compile_time} compile_budget_ms=#{inspect(compile_budget_ms)}")
+      end
+
+      if loop in [:compile_timeout, :compile_failed] do
+        reason = if loop == :compile_timeout, do: :compile_timeout, else: :compile_failed
+        Logger.info("Skipping trial #{trial_id}: #{reason}")
+        %{
+          trial_id: trial_id,
+          architecture: spec_to_summary(spec),
+          training_time_ms: 0,
+          epochs_trained: 0,
+          training_metrics: %{},
+          final_metrics: %{},
+          validation_loss: nil,
+          model_size: est_params,
+          spec_hash: spec_hash(spec),
+          completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+          skipped: reason,
+          estimated_parameters: est_params,
+          parameter_estimation_strategy: estimation_strategy,
+          epochs_requested: Map.get(training_config, :epochs, 0),
+          phases_ms: %{
+            build_model: t_after_build - phase_t0,
+            parameter_estimation: t_after_param_estimation - t_after_build,
+            compile: compile_time,
+            training: 0,
+            evaluation: 0
+          }
         }
-      }
+      else
+
+        # Step 5: Run training
+        Logger.info("Starting training for trial #{trial_id}")
+        training_start = System.monotonic_time(:millisecond)
+
+        configured_loop =
+          loop
+          |> Axon.Loop.validate(model, val_data)
+          |> maybe_attach_early_stop(training_config)
+          |> Axon.Loop.checkpoint(event: :epoch_completed, filter: [every: 10])
+
+        original_epochs = Map.get(training_config, :epochs, 50)
+        epochs = adapt_epochs(original_epochs, est_params, training_config)
+        if epochs != original_epochs do
+          Logger.info("Trial #{trial_id}: reducing epochs from #{original_epochs} -> #{epochs} (est_params=#{est_params})")
+        end
+
+        initial_state = %Axon.ModelState{data: %{}}
+        timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
+        final_params =
+          if timeout_ms == :infinity do
+            Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs)
+          else
+            task = Task.async(fn -> Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs) end)
+            case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+              {:ok, params} -> params
+              nil -> raise "Trial #{trial_id} exceeded wall clock timeout #{timeout_ms}ms"
+              {:exit, reason} -> raise reason
+            end
+          end
+
+        training_end = System.monotonic_time(:millisecond)
+        training_time = training_end - training_start
+        Logger.info("Training completed for trial #{trial_id} in #{training_time}ms")
+        if Map.get(training_config, :debug_performance, false) do
+          Logger.info("[perf][trial #{trial_id}] training_time_ms=#{training_time} epochs_trained=#{epochs} batches_per_epoch=#{Map.get(training_config, :max_batches_per_epoch, :all)}")
+        end
+
+        # Step 6: Evaluate
+        eval_start = System.monotonic_time(:millisecond)
+        final_metrics = evaluate_model(model, final_params, val_data, training_config)
+        eval_end = System.monotonic_time(:millisecond)
+        if Map.get(training_config, :debug_performance, false) do
+          Logger.info("[perf][trial #{trial_id}] evaluation_time_ms=#{eval_end - eval_start}")
+        end
+
+        validation_loss =
+          case Map.get(final_metrics, "mean_squared_error") || Map.get(final_metrics, :mean_squared_error) do
+            %Nx.Tensor{} = t -> Nx.to_number(t)
+            v when is_number(v) -> v
+            _ -> nil
+          end
+
+        %{
+          trial_id: trial_id,
+          architecture: spec_to_summary(spec),
+          training_time_ms: training_time,
+          training_metrics: %{},
+          final_metrics: final_metrics,
+          validation_loss: validation_loss,
+          model_size: count_parameters(final_params),
+          spec_hash: spec_hash(spec),
+          completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+          estimated_parameters: est_params,
+          parameter_estimation_strategy: estimation_strategy,
+          epochs_requested: original_epochs,
+          epochs_trained: epochs,
+          phases_ms: %{
+            build_model: t_after_build - phase_t0,
+            parameter_estimation: t_after_param_estimation - t_after_build,
+            compile: compile_end - compile_start,
+            training: training_end - training_start,
+            evaluation: eval_end - eval_start
+          }
+        }
+      end
     end
   end
 
@@ -497,10 +556,12 @@ defmodule Cerebros.Training.TrialWorker do
   defp adapt_epochs(epochs, est_params, training_config) do
     disable? = Map.get(training_config, :disable_epoch_adaptation, false)
     timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
-    exla_loaded? = Code.ensure_loaded?(EXLA.Backend)
+    # Determine if we are actually using EXLA backend (not just loaded) to decide adaptation aggressiveness
+    backend = Nx.default_backend()
+    exla_active? = match?(EXLA.Backend, backend) or (is_tuple(backend) and elem(backend, 0) == EXLA.Backend)
     cond do
       disable? -> epochs
-      exla_loaded? -> epochs
+      exla_active? -> epochs
       timeout_ms == :infinity -> epochs
       est_params < 50_000 -> min(epochs, 8)
       est_params < 150_000 -> min(epochs, 6)

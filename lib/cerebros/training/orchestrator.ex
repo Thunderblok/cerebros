@@ -497,6 +497,7 @@ defmodule Cerebros.Training.Orchestrator do
           wall_clock_timeout_ms: Map.get(search_params, :wall_clock_timeout_ms, :infinity),
           disable_epoch_adaptation: Map.get(search_params, :disable_epoch_adaptation, false),
           skip_param_estimation: Map.get(search_params, :skip_param_estimation, false),
+          parameter_estimation_mode: Map.get(search_params, :parameter_estimation_mode, nil),
           max_batches_per_epoch: Map.get(search_params, :max_batches_per_epoch, nil)
         }
 

@@ -1,0 +1,22 @@
+{
+  "validation_loss": 12.800634384155273,
+  "model_size": 11,
+  "trial_id": "84f31219f15a97c3",
+  "architecture": {
+    "connectivity_patterns": {
+      "gate_after_n_lateral_connections": 3,
+      "lateral_connection_probability": 0.2,
+      "max_consecutive_lateral_connections": 7,
+      "maximum_skip_connection_depth": 7,
+      "minimum_skip_connection_depth": 1,
+      "gating_mode": "activation",
+      "gate_activation?": true
+    },
+    "unit_types": [
+      "dense"
+    ],
+    "num_levels": 1,
+    "total_units": 1
+  },
+  "epochs_trained": 1
+}

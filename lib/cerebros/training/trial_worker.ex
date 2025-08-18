@@ -102,25 +102,47 @@ defmodule Cerebros.Training.TrialWorker do
       training_config: training_config
     } = state
 
+    phase_t0 = System.monotonic_time(:millisecond)
     Logger.info("Building model for trial #{trial_id}")
 
-    # Step 1: Build the Axon model
+    # Step 1: Build the Axon model (spec -> Axon graph)
     {:ok, model} = Builder.build_model(spec)
+    t_after_build = System.monotonic_time(:millisecond)
 
-    # Parameter budget enforcement (pre-training). This can be expensive because
-    # it requires building/initializing parameters. Allow skipping for speed.
+    # Step 2: Parameter budget estimation / enforcement
     param_budget = Map.get(training_config, :parameter_budget, nil)
-    skip_estimation? = Map.get(training_config, :skip_param_estimation, false)
-    est_params =
+    skip_flag = Map.get(training_config, :skip_param_estimation, false)
+    estimation_mode =
       cond do
-        skip_estimation? ->
-          Logger.debug("Trial #{trial_id}: skipping parameter estimation for speed")
-          0
-        true -> estimate_parameter_count(model, spec)
+        mode = Map.get(training_config, :parameter_estimation_mode) -> mode
+        skip_flag -> :skip
+        true -> :full
       end
-  if param_budget && est_params > 0 && est_params > param_budget do
+
+    {est_params, estimation_strategy} =
+      case estimation_mode do
+        :skip -> {0, :skip}
+        :approximate -> {approximate_parameter_count(spec), :approximate}
+        :auto ->
+          # Heuristic: approximate for larger specs (many units) otherwise full
+          summary = spec_to_summary(spec)
+          total_units = summary.total_units
+            if total_units > 50 do
+              {approximate_parameter_count(spec), :approximate_auto}
+            else
+              {estimate_parameter_count(model, spec), :full_auto}
+            end
+        :full -> {estimate_parameter_count(model, spec), :full}
+        other ->
+          Logger.warning("Unknown parameter_estimation_mode=#{inspect(other)} falling back to :full")
+          {estimate_parameter_count(model, spec), :full}
+      end
+
+    t_after_param_estimation = System.monotonic_time(:millisecond)
+
+    if param_budget && est_params > 0 && est_params > param_budget do
       Logger.info("Skipping trial #{trial_id}: parameter budget exceeded (#{est_params} > #{param_budget})")
-      return_result = %{
+      %{
         trial_id: trial_id,
         architecture: spec_to_summary(spec),
         training_time_ms: 0,
@@ -131,92 +153,124 @@ defmodule Cerebros.Training.TrialWorker do
         model_size: est_params,
         spec_hash: spec_hash(spec),
         completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-        skipped: :parameter_budget_exceeded
+        skipped: :parameter_budget_exceeded,
+        estimated_parameters: est_params,
+        parameter_estimation_strategy: estimation_strategy,
+        phases_ms: %{
+          build_model: t_after_build - phase_t0,
+          parameter_estimation: t_after_param_estimation - t_after_build,
+          compile: 0,
+          training: 0,
+          evaluation: 0
+        }
       }
-      return_result
     else
-
-    # Step 2: Load training data
-    {train_data_full, val_data} = load_training_data(training_config)
-    max_batches = Map.get(training_config, :max_batches_per_epoch, nil)
-    train_data =
-      if max_batches && is_integer(max_batches) && max_batches > 0 do
-        Stream.take(train_data_full, max_batches)
-      else
-        train_data_full
-      end
-
-  # (Parameter budget guard handled earlier with est_params)
-
-  # Step 3: Compile the training loop
-  loop = Builder.compile_model(model, training_config)
-
-  # Step 4: Run training (Loop.trainer handles parameter initialization internally)
-    Logger.info("Starting training for trial #{trial_id}")
-    training_start = System.monotonic_time(:millisecond)
-
-    # Configure training loop with validation and early stopping
-    configured_loop =
-      loop
-      |> Axon.Loop.validate(model, val_data)
-      # Early stopping metric name must match attached metric ("mean_squared_error")
-      |> Axon.Loop.early_stop("mean_squared_error", patience: get_patience(training_config))
-      |> Axon.Loop.checkpoint(event: :epoch_completed, filter: [every: 10])
-
-    # Run the training
-  original_epochs = Map.get(training_config, :epochs, 50)
-  epochs = adapt_epochs(original_epochs, est_params, training_config)
-    if epochs != original_epochs do
-      Logger.info("Trial #{trial_id}: reducing epochs from #{original_epochs} -> #{epochs} (est_params=#{est_params})")
-    end
-  # Initialize with an empty Axon.ModelState to avoid deprecation warning about passing a plain map
-  initial_state = %Axon.ModelState{data: %{}}
-    timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
-    final_params =
-      if timeout_ms == :infinity do
-        Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs)
-      else
-        task = Task.async(fn -> Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs) end)
-        case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-          {:ok, params} -> params
-          nil -> raise "Trial #{trial_id} exceeded wall clock timeout #{timeout_ms}ms"
-          {:exit, reason} -> raise reason
+      # Step 3: Load / attach training data
+      {train_data_full, val_data} = load_training_data(training_config)
+      max_batches = Map.get(training_config, :max_batches_per_epoch, nil)
+      train_data =
+        if max_batches && is_integer(max_batches) && max_batches > 0 do
+          Stream.take(train_data_full, max_batches)
+        else
+          train_data_full
         end
+
+      # Step 4: Compile the training loop
+      compile_start = System.monotonic_time(:millisecond)
+      loop = Builder.compile_model(model, training_config)
+      compile_end = System.monotonic_time(:millisecond)
+
+      # Step 5: Run training
+      Logger.info("Starting training for trial #{trial_id}")
+      training_start = System.monotonic_time(:millisecond)
+
+      configured_loop =
+  loop
+  |> Axon.Loop.validate(model, val_data)
+  |> maybe_attach_early_stop(training_config)
+  |> Axon.Loop.checkpoint(event: :epoch_completed, filter: [every: 10])
+
+      original_epochs = Map.get(training_config, :epochs, 50)
+      epochs = adapt_epochs(original_epochs, est_params, training_config)
+      if epochs != original_epochs do
+        Logger.info("Trial #{trial_id}: reducing epochs from #{original_epochs} -> #{epochs} (est_params=#{est_params})")
       end
-  training_metrics = %{}
 
-    training_end = System.monotonic_time(:millisecond)
-    training_time = training_end - training_start
+      initial_state = %Axon.ModelState{data: %{}}
+      timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
+      final_params =
+        if timeout_ms == :infinity do
+          Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs)
+        else
+          task = Task.async(fn -> Axon.Loop.run(configured_loop, train_data, initial_state, epochs: epochs) end)
+          case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+            {:ok, params} -> params
+            nil -> raise "Trial #{trial_id} exceeded wall clock timeout #{timeout_ms}ms"
+            {:exit, reason} -> raise reason
+          end
+        end
+      training_end = System.monotonic_time(:millisecond)
+      training_time = training_end - training_start
+      Logger.info("Training completed for trial #{trial_id} in #{training_time}ms")
 
-    Logger.info("Training completed for trial #{trial_id} in #{training_time}ms")
+      # Step 6: Evaluate
+      eval_start = System.monotonic_time(:millisecond)
+      final_metrics = evaluate_model(model, final_params, val_data, training_config)
+      eval_end = System.monotonic_time(:millisecond)
 
-    # Step 6: Evaluate final model
-    final_metrics = evaluate_model(model, final_params, val_data, training_config)
+      validation_loss =
+        case Map.get(final_metrics, "mean_squared_error") || Map.get(final_metrics, :mean_squared_error) do
+          %Nx.Tensor{} = t -> Nx.to_number(t)
+          v when is_number(v) -> v
+          _ -> nil
+        end
 
-    # Step 7: Collect comprehensive results
-    validation_loss =
-      case Map.get(final_metrics, "mean_squared_error") || Map.get(final_metrics, :mean_squared_error) do
-        %Nx.Tensor{} = t -> Nx.to_number(t)
-        v when is_number(v) -> v
-        _ -> nil
-      end
-
-  %{
-      trial_id: trial_id,
-      architecture: spec_to_summary(spec),
-      training_time_ms: training_time,
-      epochs_trained: epochs,
-      training_metrics: training_metrics,
-      final_metrics: final_metrics,
-      validation_loss: validation_loss,
-      model_size: count_parameters(final_params),
-      spec_hash: spec_hash(spec),
-  completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-  estimated_parameters: est_params,
-  epochs_requested: original_epochs,
-  epochs_trained: epochs
-    }
+      %{
+        trial_id: trial_id,
+        architecture: spec_to_summary(spec),
+        training_time_ms: training_time,
+        epochs_trained: epochs,
+        training_metrics: %{},
+        final_metrics: final_metrics,
+        validation_loss: validation_loss,
+        model_size: count_parameters(final_params),
+        spec_hash: spec_hash(spec),
+        completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+        estimated_parameters: est_params,
+        parameter_estimation_strategy: estimation_strategy,
+        epochs_requested: original_epochs,
+        epochs_trained: epochs,
+        phases_ms: %{
+          build_model: t_after_build - phase_t0,
+          parameter_estimation: t_after_param_estimation - t_after_build,
+          compile: compile_end - compile_start,
+          training: training_end - training_start,
+          evaluation: eval_end - eval_start
+        }
+      }
+    end
   end
+
+  defp approximate_parameter_count(spec) do
+    # Extremely rough dense-like approximation accounting for neuron transitions.
+    spec.levels
+    |> Enum.reduce({0, 0}, fn level, {prev_width, acc} ->
+      # For each unit assume fully connected from aggregated previous width.
+      # If prev_width is 0 (first level), treat as input size heuristically using first unit neurons.
+      units = level.units
+      level_params =
+        units
+        |> Enum.reduce({acc, prev_width}, fn u, {inner_acc, pw} ->
+          n = u.neurons
+          input_width = if pw == 0, do: n, else: pw
+          # weights + bias
+          params = input_width * n + n
+          {inner_acc + params, pw + n}
+        end)
+      {new_acc, new_width} = level_params
+      {new_width, new_acc}
+    end)
+    |> elem(1)
   end
 
   defp load_training_data(training_config) do
@@ -245,6 +299,13 @@ defmodule Cerebros.Training.TrialWorker do
 
   defp get_patience(training_config) do
     Map.get(training_config, :early_stop_patience, 10)
+  end
+
+  defp maybe_attach_early_stop(loop, training_config) do
+    case Map.get(training_config, :early_stop?, true) do
+      true -> Axon.Loop.early_stop(loop, "mean_squared_error", patience: get_patience(training_config))
+      false -> loop
+    end
   end
 
   defp evaluate_model(model, params, validation_data, training_config) do

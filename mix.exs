@@ -20,13 +20,14 @@ defmodule Cerebros.MixProject do
   # This avoids compiling experimental modules that currently have spec/API mismatches (Nx random API, Axon typespecs, etc.).
   # TODO: Remove this narrowing once the rest of the codebase is updated for Nx 0.9 APIs and typespec cleanups.
   defp elixirc_paths(:test), do: [
-    "lib/cerebros/architecture",
-    "lib/cerebros/functions"
+    # Compile full library during tests now that connectivity + network building
+    # logic is exercised by updated test suite.
+    "lib"
   ]
   defp elixirc_paths(_), do: ["lib"]
 
   def application do
-    base = [extra_applications: [:logger, :crypto]]
+  base = [extra_applications: [:logger, :crypto, :telemetry, :nx]]
     if Mix.env() == :test do base
     else
       base ++ [mod: {Cerebros.Application, []}]

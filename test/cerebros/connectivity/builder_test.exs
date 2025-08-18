@@ -5,8 +5,29 @@ defmodule Cerebros.ConnectivityBuilderTest do
   alias Cerebros.Connectivity.Builder
 
   describe "connectivity building" do
+    # NOTE: Tests originally referenced legacy keys (predecessor_prob, lateral_prob, etc.)
+    # The current connectivity builder expects the richer config used in Spec.
+    # For backward compatibility in these unit tests we provide a helper to
+    # translate simplified probabilities into required factors.
+
+  defp legacy_config(%{predecessor_prob: pred, lateral_prob: lat}) do
+      %{
+        minimum_skip_connection_depth: 1,
+        maximum_skip_connection_depth: 7,
+        predecessor_affinity_factor_first: max(pred * 5.0, 0.1),
+    predecessor_affinity_factor_main: max(pred, 0.1),
+        predecessor_affinity_factor_decay: fn d -> :math.pow(0.9, d) end,
+        lateral_connection_probability: lat,
+        lateral_connection_decay: fn d -> :math.pow(0.95, d) end,
+        max_consecutive_lateral_connections: 7,
+        gate_after_n_lateral_connections: 3,
+        gate_activation: &Axon.sigmoid/1,
+        gating_mode: :activation
+      }
+    end
     test "builds connectivity for simple linear architecture" do
       spec = %Spec{
+        seed: 42,
         input_specs: [%{shape: {10,}, name: "input"}],
         levels: [
           %{
@@ -22,12 +43,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
             is_final: true
           }
         ],
-        connectivity_config: %{
-          predecessor_prob: 1.0,  # Always connect to predecessors
-          lateral_prob: 0.0,      # No lateral connections
-          skip_prob: 0.0,         # No skip connections
-          gated_lateral_prob: 0.0
-        }
+        connectivity_config: legacy_config(%{predecessor_prob: 1.0, lateral_prob: 0.0})
       }
 
       {:ok, connectivity} = Builder.build_connectivity(spec)
@@ -51,6 +67,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
 
     test "respects lateral connectivity probability" do
       spec = %Spec{
+        seed: 42,
         input_specs: [%{shape: {10,}, name: "input"}],
         levels: [
           %{
@@ -70,12 +87,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
             is_final: true
           }
         ],
-        connectivity_config: %{
-          predecessor_prob: 1.0,
-          lateral_prob: 1.0,  # Always connect laterally
-          skip_prob: 0.0,
-          gated_lateral_prob: 0.0
-        }
+        connectivity_config: legacy_config(%{predecessor_prob: 1.0, lateral_prob: 1.0})
       }
 
       {:ok, connectivity} = Builder.build_connectivity(spec)
@@ -84,19 +96,17 @@ defmodule Cerebros.ConnectivityBuilderTest do
       level_1_units = [{1, 0}, {1, 1}, {1, 2}]
 
       Enum.each(level_1_units, fn unit_key ->
-        connections = connectivity[unit_key]
-        other_units = level_1_units -- [unit_key]
-
-        # Should have lateral connections to other units in same level
-        assert length(connections.laterals) > 0
-        Enum.each(connections.laterals, fn lateral ->
-          assert lateral in other_units
-        end)
+        %{laterals: laterals} = connectivity[unit_key]
+        {_, uid} = unit_key
+  # With probability 1.0 every earlier unit should be a lateral connection; unit 0 has none
+  expected = if uid == 0, do: [], else: Enum.map(0..(uid - 1), fn prev -> {1, prev} end)
+        assert Enum.sort(laterals) == Enum.sort(expected)
       end)
     end
 
     test "validates DAG property" do
       spec = %Spec{
+        seed: 11,
         input_specs: [%{shape: {10,}, name: "input"}],
         levels: [
           %{
@@ -112,18 +122,13 @@ defmodule Cerebros.ConnectivityBuilderTest do
             is_final: true
           }
         ],
-        connectivity_config: %{
-          predecessor_prob: 1.0,
-          lateral_prob: 0.0,
-          skip_prob: 0.0,
-          gated_lateral_prob: 0.0
-        }
+        connectivity_config: legacy_config(%{predecessor_prob: 1.0, lateral_prob: 0.0})
       }
 
       {:ok, connectivity} = Builder.build_connectivity(spec)
 
-      # Should pass DAG validation
-      assert Builder.validate_dag(connectivity) == :ok
+      # Should pass DAG validation using new API
+      assert :ok = Builder.validate_dag_properties(connectivity, spec)
     end
 
     test "detects cycles in invalid connectivity" do
@@ -138,6 +143,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
 
     test "produces deterministic results with same seed" do
       spec = %Spec{
+        seed: 95,
         input_specs: [%{shape: {10,}, name: "input"}],
         levels: [
           %{
@@ -156,12 +162,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
             is_final: true
           }
         ],
-        connectivity_config: %{
-          predecessor_prob: 0.7,
-          lateral_prob: 0.5,
-          skip_prob: 0.3,
-          gated_lateral_prob: 0.2
-        }
+        connectivity_config: legacy_config(%{predecessor_prob: 0.7, lateral_prob: 0.5})
       }
 
       # Build connectivity twice with same seed
@@ -180,6 +181,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
     test "repairs disconnected components" do
       # Create a spec that might generate disconnected components
       spec = %Spec{
+        seed: 777,
         input_specs: [%{shape: {10,}, name: "input"}],
         levels: [
           %{
@@ -198,12 +200,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
             is_final: true
           }
         ],
-        connectivity_config: %{
-          predecessor_prob: 0.0,  # Very low probability
-          lateral_prob: 0.0,
-          skip_prob: 0.0,
-          gated_lateral_prob: 0.0
-        }
+        connectivity_config: legacy_config(%{predecessor_prob: 0.1, lateral_prob: 0.0})
       }
 
       {:ok, connectivity} = Builder.build_connectivity(spec)
@@ -225,6 +222,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
   describe "JSON export" do
     test "exports connectivity to valid JSON" do
       spec = %Spec{
+        seed: 31415,
         input_specs: [%{shape: {10,}, name: "input"}],
         levels: [
           %{
@@ -240,12 +238,7 @@ defmodule Cerebros.ConnectivityBuilderTest do
             is_final: true
           }
         ],
-        connectivity_config: %{
-          predecessor_prob: 1.0,
-          lateral_prob: 0.0,
-          skip_prob: 0.0,
-          gated_lateral_prob: 0.0
-        }
+        connectivity_config: legacy_config(%{predecessor_prob: 1.0, lateral_prob: 0.0})
       }
 
       {:ok, connectivity} = Builder.build_connectivity(spec)

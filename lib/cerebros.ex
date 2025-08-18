@@ -214,10 +214,11 @@ defmodule Cerebros do
                   validation_x: val_x,
                   validation_y: val_y_for_search
                 }}
-             ] ++ cfg_overrides ++ [
+        ] ++ cfg_overrides ++ [
                {:search_profile, profile},
                {:cancel_on_timeout, true},
-               {:max_wait_ms, max_wait_ms}
+          {:max_wait_ms, max_wait_ms},
+          {:debug_performance, Keyword.get(opts, :debug_performance, false)}
              ]) do
           {:ok, results} ->
             IO.puts("🏆 Ames housing test completed successfully!")
@@ -232,6 +233,50 @@ defmodule Cerebros do
         {:error, reason}
     end
   end
+
+  @doc """
+  Run a full end-to-end demo ("haus") with a single command:
+    * Ensures EXLA backend is set up (GPU if available, else CPU)
+    * Loads (or simulates) Ames housing dataset
+    * Runs NAS search with performance diagnostics enabled
+    * Prints summarized best model regression metrics
+
+  Options:
+    :search_profile - :conservative | :balanced | :aggressive (default :balanced)
+    Any option accepted by test_ames_housing_example/1 (e.g., :trial_timeout_ms, :maximum_levels, etc.)
+    :no_backend_setup - if true, skip automatic backend setup (use current Nx default)
+    :debug_performance - force performance diagnostics (defaults true here)
+  """
+  def haus(opts \\ []) do
+    IO.puts("🏡 Cerebros one-command housing NAS demo (haus)")
+    unless Keyword.get(opts, :no_backend_setup, false) do
+      case setup_exla_backend() do
+        :cuda -> IO.puts("🚀 Using CUDA EXLA backend")
+        :host -> IO.puts("🖥️  Using host (CPU) EXLA backend")
+        other -> IO.puts("ℹ️  Backend setup returned #{inspect(other)}")
+      end
+    else
+      IO.puts("⏭  Skipping backend setup per :no_backend_setup option")
+    end
+
+    profile = Keyword.get(opts, :search_profile, :balanced)
+    debug = Keyword.get(opts, :debug_performance, true)
+    timeout_ms = Keyword.get(opts, :trial_timeout_ms, nil)
+
+    haus_opts =
+      opts
+      |> Keyword.put(:search_profile, profile)
+      |> Keyword.put(:debug_performance, debug)
+      |> maybe_put(:trial_timeout_ms, timeout_ms)
+
+    case test_ames_housing_example(haus_opts) do
+      {:ok, results} -> {:ok, results}
+      other -> other
+    end
+  end
+
+  defp maybe_put(opts, _k, nil), do: opts
+  defp maybe_put(opts, k, v), do: Keyword.put(opts, k, v)
 
   # Load and preprocess Ames housing data
   defp load_ames_data do
@@ -954,18 +999,7 @@ defmodule Cerebros do
       IO.puts("⚠️  Size too small for meaningful benchmark; increasing to 128")
     end
 
-    rng_tensor = fn shape, seed ->
-      try do
-        # Prefer built-in uniform if available (depends on Nx version)
-        if function_exported?(Nx, :random_uniform, 2) do
-          Nx.random_uniform(shape, type: :f32)
-        else
-          normal(shape, 0.0, 1.0, seed)
-        end
-      rescue
-        _ -> normal(shape, 0.0, 1.0, seed)
-      end
-    end
+  rng_tensor = fn shape, seed -> normal(shape, 0.0, 1.0, seed) end
 
     IO.puts("🧪 Benchmarking matmul #{size}x#{size} (backend=#{inspect(Nx.default_backend())}) …")
     flop_count = 2.0 * size * size * size # ~2N^3 floating ops
@@ -1059,15 +1093,21 @@ defmodule Cerebros do
       end)
       |> Enum.take(batches)
 
-    {init_t_ms, params_state} = time_ms(fn -> Axon.Loop.run(loop, stream |> Enum.take(1), %{}, epochs: 1) end)
+  {init_t_ms, _params_state} = time_ms(fn -> Axon.Loop.run(loop, stream |> Enum.take(1), %{}, epochs: 1) end)
     # Recreate loop to avoid warmed internal state aside from compiled functions
     loop2 = Axon.Loop.trainer(model, loss_fun, opt)
     stream2 = Enum.drop(stream, 1)
     {t_ms, _} = time_ms(fn -> Axon.Loop.run(loop2, stream2, %{}, epochs: 1) end)
 
     # Parameter count (approx FLOPs per forward ~ param_count; forward+backward ~ 2x)
-    {_graph, params, _state} = Axon.build(model, %{ "x" => normal({1, input_dim}, 0.0, 1.0, 42) })
-    param_total = params.data |> Map.values() |> Enum.flat_map(&Map.values/1) |> Enum.map(&Nx.size/1) |> Enum.sum()
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(%{"x" => normal({1, input_dim}, 0.0, 1.0, 42)}, Axon.ModelState.empty())
+    param_total =
+      case params do
+        %Axon.ModelState{data: data} ->
+          data |> Map.values() |> Enum.flat_map(&Map.values/1) |> Enum.map(&Nx.size/1) |> Enum.sum()
+        _ -> 0
+      end
     per_batch_flop_est = 2.0 * param_total
     measured_batches = batches - 1 # first batch used just for init
     steps_per_sec = measured_batches / (t_ms / 1000.0)

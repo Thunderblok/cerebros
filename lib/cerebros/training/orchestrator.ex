@@ -11,9 +11,7 @@ defmodule Cerebros.Training.Orchestrator do
   require Logger
 
   alias Cerebros.Architecture.Spec
-  alias Cerebros.Networks.Builder
   alias Cerebros.Training.TrialWorker
-  alias Cerebros.Results.Collector
 
   @type trial_id :: String.t()
   @type trial_status :: :pending | :running | :completed | :failed
@@ -498,7 +496,8 @@ defmodule Cerebros.Training.Orchestrator do
           disable_epoch_adaptation: Map.get(search_params, :disable_epoch_adaptation, false),
           skip_param_estimation: Map.get(search_params, :skip_param_estimation, false),
           parameter_estimation_mode: Map.get(search_params, :parameter_estimation_mode, nil),
-          max_batches_per_epoch: Map.get(search_params, :max_batches_per_epoch, nil)
+          max_batches_per_epoch: Map.get(search_params, :max_batches_per_epoch, nil),
+          debug_performance: Map.get(search_params, :debug_performance, false)
         }
 
         trial_info = %{

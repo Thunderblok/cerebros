@@ -105,6 +105,26 @@ defmodule Cerebros.Training.TrialWorker do
     phase_t0 = System.monotonic_time(:millisecond)
     Logger.info("Building model for trial #{trial_id}")
 
+    # Optional performance / backend diagnostics (lightweight, controlled by :debug_performance)
+    if Map.get(training_config, :debug_performance, false) do
+      backend = Nx.default_backend()
+      exla_loaded? = Code.ensure_loaded?(EXLA.Backend)
+      exla_target = System.get_env("EXLA_TARGET") || "(not set)"
+      Logger.info("[perf][trial #{trial_id}] default_backend=#{inspect(backend)} exla_loaded?=#{exla_loaded?} EXLA_TARGET=#{exla_target}")
+      if exla_loaded? do
+        # Tiny JIT sanity check (guard against unexpected slow interpreter path)
+        try do
+          fun = Nx.Defn.jit(fn -> Nx.sum(Nx.iota({8})) end, compiler: EXLA)
+          _ = fun.()
+          Logger.debug("[perf][trial #{trial_id}] EXLA JIT sanity check ok")
+        rescue
+          e -> Logger.warning("[perf][trial #{trial_id}] EXLA JIT test failed: #{inspect(e)}")
+        end
+      else
+        Logger.warning("[perf][trial #{trial_id}] EXLA not loaded – training will use pure interpreter and be slow. Call Cerebros.setup_exla_backend/0 before starting the search for major speedups.")
+      end
+    end
+
     # Step 1: Build the Axon model (spec -> Axon graph)
     {:ok, model} = Builder.build_model(spec)
     t_after_build = System.monotonic_time(:millisecond)
@@ -139,6 +159,10 @@ defmodule Cerebros.Training.TrialWorker do
       end
 
     t_after_param_estimation = System.monotonic_time(:millisecond)
+
+    if Map.get(training_config, :debug_performance, false) do
+      Logger.info("[perf][trial #{trial_id}] parameter_estimation strategy=#{estimation_strategy} est_params=#{est_params} time_ms=#{t_after_param_estimation - t_after_build}")
+    end
 
     if param_budget && est_params > 0 && est_params > param_budget do
       Logger.info("Skipping trial #{trial_id}: parameter budget exceeded (#{est_params} > #{param_budget})")
@@ -179,6 +203,9 @@ defmodule Cerebros.Training.TrialWorker do
       compile_start = System.monotonic_time(:millisecond)
       loop = Builder.compile_model(model, training_config)
       compile_end = System.monotonic_time(:millisecond)
+      if Map.get(training_config, :debug_performance, false) do
+        Logger.info("[perf][trial #{trial_id}] compile_time_ms=#{compile_end - compile_start}")
+      end
 
       # Step 5: Run training
       Logger.info("Starting training for trial #{trial_id}")
@@ -212,11 +239,17 @@ defmodule Cerebros.Training.TrialWorker do
       training_end = System.monotonic_time(:millisecond)
       training_time = training_end - training_start
       Logger.info("Training completed for trial #{trial_id} in #{training_time}ms")
+      if Map.get(training_config, :debug_performance, false) do
+        Logger.info("[perf][trial #{trial_id}] training_time_ms=#{training_time} epochs_trained=#{epochs} batches_per_epoch=#{Map.get(training_config, :max_batches_per_epoch, :all)}")
+      end
 
       # Step 6: Evaluate
       eval_start = System.monotonic_time(:millisecond)
       final_metrics = evaluate_model(model, final_params, val_data, training_config)
       eval_end = System.monotonic_time(:millisecond)
+      if Map.get(training_config, :debug_performance, false) do
+        Logger.info("[perf][trial #{trial_id}] evaluation_time_ms=#{eval_end - eval_start}")
+      end
 
       validation_loss =
         case Map.get(final_metrics, "mean_squared_error") || Map.get(final_metrics, :mean_squared_error) do
@@ -229,7 +262,7 @@ defmodule Cerebros.Training.TrialWorker do
         trial_id: trial_id,
         architecture: spec_to_summary(spec),
         training_time_ms: training_time,
-        epochs_trained: epochs,
+  # epochs_trained already included below; omit duplicate to silence warning
         training_metrics: %{},
         final_metrics: final_metrics,
         validation_loss: validation_loss,
@@ -336,7 +369,7 @@ defmodule Cerebros.Training.TrialWorker do
 
   defp compute_custom_metric(:top_5_accuracy, model, params, validation_data) do
     # Implement top-5 accuracy calculation
-    predictions = Axon.predict(model, params, validation_data)
+  _predictions = Axon.predict(model, params, validation_data)
     # Implementation would depend on specific needs
     0.0  # Placeholder
   end
@@ -460,7 +493,7 @@ defmodule Cerebros.Training.TrialWorker do
   # Heuristic epoch adaptation to avoid wall clock timeouts on pure interpreter backends.
   # If EXLA (or any JIT backend) is not loaded, large parameter counts can make epochs very slow.
   # We scale epochs down based on parameter buckets unless the user explicitly set :disable_epoch_adaptation.
-  defp adapt_epochs(epochs, _est_params, training_config) when epochs <= 1, do: epochs
+  defp adapt_epochs(epochs, _est_params, _training_config) when epochs <= 1, do: epochs
   defp adapt_epochs(epochs, est_params, training_config) do
     disable? = Map.get(training_config, :disable_epoch_adaptation, false)
     timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)

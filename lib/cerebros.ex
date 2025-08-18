@@ -11,6 +11,23 @@ defmodule Cerebros do
   end
 
   @doc """
+  Basic EXLA diagnostics delegating to `Cerebros.ExlaHelper` (legacy helper).
+
+  For richer backend + environment details use `gpu_diagnostics/1` which
+  returns a map of facts. This function only prints and returns :ok.
+  """
+  def exla_diagnostics do
+    Cerebros.ExlaHelper.diagnostics()
+  end
+
+  @doc """
+  Sets up the best available EXLA backend automatically.
+  """
+  def setup_exla_backend do
+    Cerebros.ExlaHelper.setup_best_backend()
+  end
+
+  @doc """
   Quick test function to verify the system is working.
   """
   def test_basic_functionality do
@@ -137,28 +154,71 @@ defmodule Cerebros do
             {train_y, val_y, nil, nil}
           end
 
-        # Run a smaller, focused search
-        max_wait_ms = Keyword.get(opts, :max_wait_ms, 180_000)
-        case test_full_nas_run(
-               input_shapes: [{feature_count}],
-               output_shapes: [{1}],
-               maximum_levels: 3,
-               maximum_units_per_level: 3,
-               maximum_neurons_per_unit: 20,
-               number_of_architectures_to_try: 3,
-               number_of_trials_per_architecture: 1,
-               epochs: 15,
-               # Bound individual trial wall clock to avoid very long stragglers
-               wall_clock_timeout_ms: Keyword.get(opts, :trial_timeout_ms, 90_000),
-               max_wait_ms: max_wait_ms,
-               cancel_on_timeout: true,
-               dataset: %{
-                 train_x: train_x,
-                 train_y: train_y_for_search,
-                 validation_x: val_x,
-                 validation_y: val_y_for_search
-               }
-             ) do
+        # Select search profile (scales breadth/depth). Users can still override any individual knob.
+        profile = Keyword.get(opts, :search_profile, :balanced)
+        {max_lv, max_units, max_neurons, archs, trials, epochs, timeout_ms, param_budget} =
+          case profile do
+            :conservative -> {3, 3, 24, 3, 1, 12, Keyword.get(opts, :trial_timeout_ms, 60_000), Keyword.get(opts, :parameter_budget, nil)}
+            :balanced -> {5, 5, 64, 6, 2, 18, Keyword.get(opts, :trial_timeout_ms, 90_000), Keyword.get(opts, :parameter_budget, 800_000)}
+            :aggressive -> {8, 6, 256, 10, 2, 20, Keyword.get(opts, :trial_timeout_ms, 120_000), Keyword.get(opts, :parameter_budget, 2_000_000)}
+            other when is_map(other) ->
+              # Allow custom map profile for power users: %{max_levels: .., max_neurons: ..}
+              {
+                Map.get(other, :maximum_levels, 5),
+                Map.get(other, :maximum_units_per_level, 5),
+                Map.get(other, :maximum_neurons_per_unit, 64),
+                Map.get(other, :number_of_architectures_to_try, 6),
+                Map.get(other, :number_of_trials_per_architecture, 2),
+                Map.get(other, :epochs, 18),
+                Map.get(other, :trial_timeout_ms, Keyword.get(opts, :trial_timeout_ms, 90_000)),
+                Map.get(other, :parameter_budget, Keyword.get(opts, :parameter_budget, 800_000))
+              }
+            _ -> {5, 5, 64, 6, 2, 18, Keyword.get(opts, :trial_timeout_ms, 90_000), Keyword.get(opts, :parameter_budget, 800_000)}
+          end
+
+        IO.puts("🗺  Search profile=#{inspect(profile)} (lv<=#{max_lv}, units/lv<=#{max_units}, neurons/unit<=#{max_neurons}, archs=#{archs}, trials/arch=#{trials}, epochs=#{epochs}, param_budget=#{inspect(param_budget)})")
+
+        # Allow explicit user overrides to trump profile-derived defaults
+        cfg_overrides = [
+          {:maximum_levels, Keyword.get(opts, :maximum_levels, max_lv)},
+          {:maximum_units_per_level, Keyword.get(opts, :maximum_units_per_level, max_units)},
+          {:maximum_neurons_per_unit, Keyword.get(opts, :maximum_neurons_per_unit, max_neurons)},
+          {:number_of_architectures_to_try, Keyword.get(opts, :number_of_architectures_to_try, archs)},
+          {:number_of_trials_per_architecture, Keyword.get(opts, :number_of_trials_per_architecture, trials)},
+          {:epochs, Keyword.get(opts, :epochs, epochs)},
+          {:wall_clock_timeout_ms, timeout_ms},
+          {:parameter_budget, param_budget},
+          # Pass through disable flags if provided
+          {:disable_epoch_adaptation, Keyword.get(opts, :disable_epoch_adaptation, false)}
+        ]
+
+        # If caller explicitly sets :unbounded, clear parameter budget & adaptation
+        cfg_overrides =
+          if Keyword.get(opts, :unbounded, false) do
+            IO.puts("🔥 Unbounded mode: removing parameter budget & epoch adaptation limits (may be slow on CPU)")
+            cfg_overrides
+            |> Keyword.put(:parameter_budget, nil)
+            |> Keyword.put(:disable_epoch_adaptation, true)
+          else
+            cfg_overrides
+          end
+
+        max_wait_ms = Keyword.get(opts, :max_wait_ms, timeout_ms * 2)
+        case test_full_nas_run([
+               {:input_shapes, [{feature_count}]},
+               {:output_shapes, [{1}]},
+               {:dataset,
+                %{
+                  train_x: train_x,
+                  train_y: train_y_for_search,
+                  validation_x: val_x,
+                  validation_y: val_y_for_search
+                }}
+             ] ++ cfg_overrides ++ [
+               {:search_profile, profile},
+               {:cancel_on_timeout, true},
+               {:max_wait_ms, max_wait_ms}
+             ]) do
           {:ok, results} ->
             IO.puts("🏆 Ames housing test completed successfully!")
             analyze_regression_performance(train_y, val_y, results, target_mean: target_mean, target_std: target_std)
@@ -411,6 +471,11 @@ defmodule Cerebros do
     IO.puts("🔬 Starting full Neural Architecture Search test...")
 
     # Default configuration matching original Cerebros parameters
+    exla_loaded = Code.ensure_loaded?(EXLA.Backend)
+    unless exla_loaded do
+      IO.puts("⚠️  EXLA not loaded; enabling conservative defaults (epoch adaptation + parameter budget) to avoid timeouts.")
+    end
+
     config = %{
       input_shapes: Keyword.get(opts, :input_shapes, [{10}]),
       output_shapes: Keyword.get(opts, :output_shapes, [{1}]),
@@ -425,7 +490,12 @@ defmodule Cerebros do
       epochs: Keyword.get(opts, :epochs, 10),
       batch_size: Keyword.get(opts, :batch_size, 32),
   learning_rate: Keyword.get(opts, :learning_rate, 0.01),
-  wall_clock_timeout_ms: Keyword.get(opts, :wall_clock_timeout_ms, Keyword.get(opts, :trial_timeout_ms, :infinity))
+  wall_clock_timeout_ms: Keyword.get(opts, :wall_clock_timeout_ms, Keyword.get(opts, :trial_timeout_ms, :infinity)),
+      # Soft parameter budget when EXLA missing (can override by passing :parameter_budget or setting to nil)
+      parameter_budget: Keyword.get(opts, :parameter_budget, if(exla_loaded, do: nil, else: 400_000)),
+  disable_epoch_adaptation: Keyword.get(opts, :disable_epoch_adaptation, false),
+  skip_param_estimation: Keyword.get(opts, :skip_param_estimation, Keyword.get(opts, :speed_mode, false)),
+  speed_mode: Keyword.get(opts, :speed_mode, false)
     }
 
     # Optional search expansion knobs (display only if provided)
@@ -433,7 +503,8 @@ defmodule Cerebros do
       :merge_strategy_pool,
       :max_merge_width,
       :projection_after_merge,
-      :early_stop_patience
+      :early_stop_patience,
+      :search_profile
     ]
     extras =
       extra_keys
@@ -446,6 +517,20 @@ defmodule Cerebros do
       |> Enum.into(%{})
 
     config = Map.merge(config, extras)
+
+    # Speed mode trims expensive pieces for faster visual feedback
+    config =
+      if config.speed_mode do
+        IO.puts("⚡ Speed mode: limiting epochs, batches, and enabling quick early stopping")
+        Map.merge(config, %{
+          epochs: min(config.epochs, 5),
+          early_stop_patience: 2,
+          max_batches_per_epoch: Map.get(config, :max_batches_per_epoch, 6),
+          skip_param_estimation: true
+        })
+      else
+        config
+      end
 
     IO.puts("📊 Configuration: #{inspect(config, pretty: true)}")
 
@@ -465,7 +550,16 @@ defmodule Cerebros do
 
     # Step 2: Start the search orchestrator
     IO.puts("🎯 Starting search orchestrator...")
+    # Allow max_concurrent override or derive from search_profile to let aggressive runs "breathe"
+    derived_concurrency =
+      case Map.get(config, :search_profile) do
+        :aggressive -> 4
+        :balanced -> 3
+        _ -> 2
+      end
+    max_concurrent = Keyword.get(opts, :max_concurrent, derived_concurrency)
     {:ok, orchestrator_pid} = Cerebros.Training.Orchestrator.start_link(%{
+      max_concurrent: max_concurrent,
       search_params: config,
       dataset: %{
         train_x: train_x,
@@ -474,6 +568,7 @@ defmodule Cerebros do
         validation_y: val_y
       }
     })
+    IO.puts("🧵 Concurrency: max_concurrent=#{max_concurrent}")
 
     # Step 3: Run the search
     IO.puts("🚀 Launching neural architecture search...")
@@ -494,7 +589,7 @@ defmodule Cerebros do
 
     # Robust wait loop: loop with explicit tail recursion, no anonymous self-ref closure (clearer debugging),
     # and progress emission every second.
-    progress_emit_ms = 1_000
+  progress_emit_ms = if config.speed_mode, do: 5_000, else: 1_000
     wait_loop = fn ->
       rec = fn rec_fun, last_emit ->
         elapsed = System.monotonic_time(:millisecond) - start_wait
@@ -741,13 +836,23 @@ defmodule Cerebros do
 
       IO.puts("🏅 Best trial performance:")
       IO.puts("   - Validation Loss: #{if is_number(best_loss), do: Float.round(best_loss, 6), else: "n/a"}")
+      # If validation_loss is nil but mean_squared_error metric exists, show it explicitly
+      mse_metric =
+        cond do
+          is_number(get_in(best_trial, [:final_metrics, "mean_squared_error"])) -> get_in(best_trial, [:final_metrics, "mean_squared_error"])
+          is_number(get_in(best_trial, [:final_metrics, :mean_squared_error])) -> get_in(best_trial, [:final_metrics, :mean_squared_error])
+          true -> nil
+        end
+      if mse_metric && (best_loss == nil or best_loss == :infinity) do
+        IO.puts("   - mean_squared_error: #{Float.round(mse_metric, 6)}")
+      end
       IO.puts("   - Trial ID: #{Map.get(best_trial, :trial_id, "n/a")}")
       IO.puts("   - Model Size (params): #{Map.get(best_trial, :model_size, "n/a")}")
 
       IO.puts("📈 Overall search statistics:")
       IO.puts("   - Total trials: #{length(trials)}")
-      IO.puts("   - Average validation loss: #{Float.round(avg_loss, 6)}")
-      IO.puts("   - Best validation loss: #{if is_number(best_loss), do: Float.round(best_loss, 6), else: "n/a"}")
+  IO.puts("   - Average validation loss: #{Float.round(avg_loss, 6)}")
+  IO.puts("   - Best validation loss: #{if is_number(best_loss), do: Float.round(best_loss, 6), else: "n/a"}")
 
       improvement = if avg_loss > 0.0 and is_number(best_loss) do
         (avg_loss - best_loss) / avg_loss * 100.0
@@ -825,5 +930,231 @@ defmodule Cerebros do
       |> Enum.map(fn z -> z * sigma + mean end)
 
     Nx.tensor(values, type: :f32) |> Nx.reshape(shape)
+  end
+
+  @doc """
+  Benchmark a matrix multiplication to sanity‑check that EXLA (GPU or CPU) is active.
+
+  Options:
+    * :size – matrix dimension N for an (N x N) * (N x N) multiply (default 1024)
+    * :reps – repetitions (default 3)
+    * :warmup – warmup repetitions not timed (default 1)
+
+  Returns a map with timing statistics and an approximate GFLOP/s figure.
+
+  NOTE: If you see very low GFLOP/s (< 20 on modern GPUs) you're likely still on CPU.
+        Make sure you compiled EXLA with `EXLA_TARGET=cuda` before `mix deps.compile exla`.
+  """
+  def benchmark_matmul(opts \\ []) do
+    size   = Keyword.get(opts, :size, 1024)
+    reps   = Keyword.get(opts, :reps, 3)
+    warmup = Keyword.get(opts, :warmup, 1)
+
+    if size < 128 do
+      IO.puts("⚠️  Size too small for meaningful benchmark; increasing to 128")
+    end
+
+    rng_tensor = fn shape, seed ->
+      try do
+        # Prefer built-in uniform if available (depends on Nx version)
+        if function_exported?(Nx, :random_uniform, 2) do
+          Nx.random_uniform(shape, type: :f32)
+        else
+          normal(shape, 0.0, 1.0, seed)
+        end
+      rescue
+        _ -> normal(shape, 0.0, 1.0, seed)
+      end
+    end
+
+    IO.puts("🧪 Benchmarking matmul #{size}x#{size} (backend=#{inspect(Nx.default_backend())}) …")
+    flop_count = 2.0 * size * size * size # ~2N^3 floating ops
+
+    run_once = fn rep_idx ->
+      a = rng_tensor.({size, size}, 10 + rep_idx)
+      b = rng_tensor.({size, size}, 20 + rep_idx)
+      t0 = System.monotonic_time(:microsecond)
+      c = Nx.dot(a, b)
+      # Force realization; ensures JIT + execution completes before timing stop
+      _ = Nx.backend_copy(c)
+      dt_us = System.monotonic_time(:microsecond) - t0
+      dt_ms = dt_us / 1000.0
+      gflops = flop_count / (dt_ms / 1000.0) / 1.0e9
+      {dt_ms, gflops}
+    end
+
+    # Warmup (not timed in stats)
+    Enum.each(1..warmup, fn _ -> run_once.(0) end)
+
+    measurements = Enum.map(1..reps, run_once)
+    times_ms = Enum.map(measurements, &elem(&1, 0))
+    gflops_list = Enum.map(measurements, &elem(&1, 1))
+    avg_ms = Enum.sum(times_ms) / reps
+    avg_gflops = Enum.sum(gflops_list) / reps
+    min_ms = Enum.min(times_ms)
+    max_ms = Enum.max(times_ms)
+
+    result = %{
+      size: size,
+      reps: reps,
+      backend: inspect(Nx.default_backend()),
+      times_ms: times_ms,
+      avg_ms: avg_ms,
+      min_ms: min_ms,
+      max_ms: max_ms,
+      avg_gflops: avg_gflops,
+      flop_count: flop_count
+    }
+
+    IO.puts("⏱  Times (ms): #{Enum.map(times_ms, &Float.round(&1, 2)) |> Enum.join(", ")}")
+    IO.puts("📊 Avg: #{Float.round(avg_ms, 2)} ms  (min #{Float.round(min_ms, 2)} / max #{Float.round(max_ms, 2)})")
+    IO.puts("🚀 Throughput: ~#{Float.round(avg_gflops, 2)} GFLOP/s")
+    case System.get_env("EXLA_TARGET") do
+      "cuda" -> IO.puts("(If this GFLOP/s seems low for your GPU, verify driver + that EXLA was compiled with CUDA support)")
+      _ -> IO.puts("(CPU target detected; set EXLA_TARGET=cuda + recompile exla for GPU acceleration)")
+    end
+
+    result
+  end
+
+  @doc """
+  Run a lightweight synthetic training benchmark to estimate steps/sec.
+
+  Options:
+    * :input_dim  (default 256)
+    * :hidden_dims list of layer sizes (default [512,512])
+    * :output_dim (default 128)
+    * :batch_size (default 256)
+    * :batches    number of batches to time (default 20)
+    * :dtype      numeric type (default :f32)
+
+  Returns a map with timing stats and approximate forward+backward GFLOP/s (rough heuristic: 2 * parameter_count per batch).
+  """
+  def benchmark_training(opts \\ []) do
+    ensure_exla!(verbose: false)
+    input_dim  = Keyword.get(opts, :input_dim, 256)
+    hidden     = Keyword.get(opts, :hidden_dims, [512, 512])
+    output_dim = Keyword.get(opts, :output_dim, 128)
+    batch_size = Keyword.get(opts, :batch_size, 256)
+    batches    = Keyword.get(opts, :batches, 20)
+    dtype      = Keyword.get(opts, :dtype, :f32)
+
+    model =
+      Enum.reduce(hidden, Axon.input("x", shape: {nil, input_dim}, type: dtype), fn h, acc ->
+        Axon.dense(acc, h, activation: :relu)
+      end)
+      |> Axon.dense(output_dim)
+
+    loss_fun = &Axon.Losses.mean_squared_error/3
+    opt = Polaris.Optimizers.adam(0.001)
+    loop = Axon.Loop.trainer(model, loss_fun, opt)
+
+    # Synthetic stream generator
+    stream =
+      Stream.repeatedly(fn ->
+        x = normal({batch_size, input_dim}, 0.0, 1.0, :erlang.unique_integer([:positive]))
+        # target just random so loss is irrelevant
+        y = normal({batch_size, output_dim}, 0.0, 1.0, :erlang.unique_integer([:positive]))
+        {x, y}
+      end)
+      |> Enum.take(batches)
+
+    {init_t_ms, params_state} = time_ms(fn -> Axon.Loop.run(loop, stream |> Enum.take(1), %{}, epochs: 1) end)
+    # Recreate loop to avoid warmed internal state aside from compiled functions
+    loop2 = Axon.Loop.trainer(model, loss_fun, opt)
+    stream2 = Enum.drop(stream, 1)
+    {t_ms, _} = time_ms(fn -> Axon.Loop.run(loop2, stream2, %{}, epochs: 1) end)
+
+    # Parameter count (approx FLOPs per forward ~ param_count; forward+backward ~ 2x)
+    {_graph, params, _state} = Axon.build(model, %{ "x" => normal({1, input_dim}, 0.0, 1.0, 42) })
+    param_total = params.data |> Map.values() |> Enum.flat_map(&Map.values/1) |> Enum.map(&Nx.size/1) |> Enum.sum()
+    per_batch_flop_est = 2.0 * param_total
+    measured_batches = batches - 1 # first batch used just for init
+    steps_per_sec = measured_batches / (t_ms / 1000.0)
+    gflops = (per_batch_flop_est * measured_batches) / (t_ms / 1000.0) / 1.0e9
+
+    result = %{
+      backend: inspect(Nx.default_backend()),
+      device_target: System.get_env("EXLA_TARGET"),
+      init_compile_ms: init_t_ms,
+      timed_batches: measured_batches,
+      batch_size: batch_size,
+      steps_per_sec: steps_per_sec,
+      est_forward_backward_flops_per_batch: per_batch_flop_est,
+      avg_batch_ms: t_ms / measured_batches,
+      approx_gflops: gflops,
+      param_count: param_total,
+      model_shape: %{input: input_dim, hidden: hidden, output: output_dim}
+    }
+
+    IO.puts("🧪 Training benchmark (#{inspect(Nx.default_backend())})")
+    IO.puts("Compile + first batch: #{Float.round(init_t_ms, 1)} ms")
+    IO.puts("Measured #{measured_batches} batches: total #{Float.round(t_ms,1)} ms")
+    IO.puts("Steps/sec: #{Float.round(steps_per_sec, 2)}  Avg batch: #{Float.round(result.avg_batch_ms,2)} ms")
+    IO.puts("Approx throughput: #{Float.round(gflops,2)} GFLOP/s (heuristic)")
+    result
+  end
+
+  defp time_ms(fun) do
+    t0 = System.monotonic_time(:microsecond)
+    val = fun.()
+    dt = (System.monotonic_time(:microsecond) - t0) / 1000.0
+    {dt, val}
+  end
+
+  @doc """
+  Poll live GPU utilization via nvidia-smi.
+
+  Options:
+    * :samples (default 5)
+    * :interval_ms (default 1000)
+
+  Returns list of maps: %{ts: DateTime, gpu_util: %, mem_util: %, mem_used_mb: ..., mem_total_mb: ..., temp_c: ...}.
+  If nvidia-smi not found or CUDA target not active returns {:error, reason}.
+  """
+  def gpu_live_metrics(opts \\ []) do
+    samples = Keyword.get(opts, :samples, 5)
+    interval = Keyword.get(opts, :interval_ms, 1000)
+    unless System.get_env("EXLA_TARGET") == "cuda" do
+      return = {:error, "EXLA_TARGET is not cuda"}
+      IO.puts("⚠️  #{elem(return,1)}")
+      return
+    end
+    query = ["--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"]
+    case System.find_executable("nvidia-smi") do
+      nil -> {:error, "nvidia-smi not found"}
+      _ ->
+        Enum.map(1..samples, fn i ->
+          {out, 0} = System.cmd("nvidia-smi", query, stderr_to_stdout: true)
+          # Expect single line like: "35, 12, 500, 8192, 54"
+          [gpu_u, mem_u, mem_used, mem_total, temp] =
+            out |> String.split("\n") |> List.first() |> String.split(",") |> Enum.map(&String.trim/1)
+          if i < samples, do: Process.sleep(interval)
+          %{
+            ts: DateTime.utc_now(),
+            gpu_util: String.to_integer(gpu_u),
+            mem_util: String.to_integer(mem_u),
+            mem_used_mb: String.to_integer(mem_used),
+            mem_total_mb: String.to_integer(mem_total),
+            temp_c: String.to_integer(temp)
+          }
+        end)
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  @doc """
+  Convenience helper: ensure EXLA backend is initialized (preferring CUDA) and return current backend.
+  """
+  def ensure_exla!(opts \\ []) do
+    mode = setup_exla_backend()
+    unless Code.ensure_loaded?(EXLA.Backend) do
+      raise "EXLA backend not loaded after setup; ensure {:exla, \"~> 0.9\"} compiled with proper EXLA_TARGET"
+    end
+    if Keyword.get(opts, :verbose, true) do
+      IO.puts("EXLA backend ready (mode=#{mode}, default=#{inspect(Nx.default_backend())})")
+    end
+    mode
   end
 end

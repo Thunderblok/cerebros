@@ -127,7 +127,7 @@ defmodule Cerebros.Training.Orchestrator do
   results_collector: collector_pid
     }
 
-    Logger.info("Training orchestrator started with max_concurrent=#{max_concurrent}")
+  Logger.info("Training orchestrator started with max_concurrent=#{max_concurrent}")
 
     {:ok, state}
   end
@@ -251,6 +251,8 @@ defmodule Cerebros.Training.Orchestrator do
   @impl GenServer
   def handle_cast({:start_search, search_params}, state) do
     new_state = start_search_trials(state, search_params)
+  total_trials = map_size(new_state.trials)
+  Logger.info("Enqueued #{total_trials} trials (archs=#{Map.get(search_params, :number_of_architectures_to_try, "?")} x trials_per_arch=#{Map.get(search_params, :number_of_trials_per_architecture, "?")})")
     {:noreply, new_state}
   end
 
@@ -314,6 +316,7 @@ defmodule Cerebros.Training.Orchestrator do
 
     {:noreply, final_state}
   end
+
 
   @impl GenServer
   def handle_info({:DOWN, _ref, :process, worker_pid, reason}, state) do
@@ -476,6 +479,9 @@ defmodule Cerebros.Training.Orchestrator do
           output_shapes: [output_dim],
           merge_config: merge_config
         )
+        if arch_count * trials_per_arch > 4 do
+          Logger.debug("Enqueued trial #{arch_idx}.#{trial_idx} levels=#{length(spec.levels)} total_units=#{Enum.sum(Enum.map(spec.levels, &length(&1.units)))} max_neurons=#{Enum.max(Enum.flat_map(spec.levels, fn l -> Enum.map(l.units, & &1.neurons) end))}")
+        end
 
         trial_id = generate_trial_id()
         training_config = %{
@@ -488,7 +494,10 @@ defmodule Cerebros.Training.Orchestrator do
           metrics: [:mean_squared_error],
           early_stop_patience: Map.get(search_params, :early_stop_patience, 10),
           parameter_budget: Map.get(search_params, :parameter_budget, nil),
-          wall_clock_timeout_ms: Map.get(search_params, :wall_clock_timeout_ms, :infinity)
+          wall_clock_timeout_ms: Map.get(search_params, :wall_clock_timeout_ms, :infinity),
+          disable_epoch_adaptation: Map.get(search_params, :disable_epoch_adaptation, false),
+          skip_param_estimation: Map.get(search_params, :skip_param_estimation, false),
+          max_batches_per_epoch: Map.get(search_params, :max_batches_per_epoch, nil)
         }
 
         trial_info = %{
@@ -510,18 +519,19 @@ defmodule Cerebros.Training.Orchestrator do
 
   defp build_dataset_streams(nil, _batch_size), do: :cifar10
   defp build_dataset_streams(%{train_x: tx, train_y: ty, validation_x: vx, validation_y: vy}, batch_size) do
-    train_stream = build_stream(tx, ty, batch_size)
-    val_stream = build_stream(vx, vy, batch_size)
-    %{train: train_stream, validation: val_stream}
+  {tx, ty} = trim_to_full_batches(tx, ty, batch_size, :train)
+  {vx, vy} = trim_to_full_batches(vx, vy, batch_size, :val)
+  train_stream = build_stream(tx, ty, batch_size)
+  val_stream = build_stream(vx, vy, batch_size)
+  %{train: train_stream, validation: val_stream}
   end
 
   defp build_stream(x, y, batch_size) do
     {num_samples, feat_dim} = Nx.shape(x)
     {label_samples, _} = Nx.shape(y)
     if num_samples != label_samples, do: raise "Sample mismatch: #{num_samples} vs #{label_samples}"
-
+    # Emit only full batches; dataset already trimmed to multiple of batch_size.
     Stream.unfold(0, fn idx ->
-      # Stop if fewer than a full batch remains to keep batch shapes consistent
       if idx + batch_size > num_samples do
         nil
       else
@@ -530,5 +540,19 @@ defmodule Cerebros.Training.Orchestrator do
         {{batch_x, batch_y}, idx + batch_size}
       end
     end)
+  end
+
+  defp trim_to_full_batches(x, y, batch_size, tag) do
+    {n, _} = Nx.shape(x)
+    full = div(n, batch_size) * batch_size
+    if full == n do
+      {x, y}
+    else
+      # Trim tail to avoid partial batch shape mismatch with compiled function
+      trimmed_x = Nx.slice(x, [0, 0], [full, elem(Nx.shape(x), 1)])
+      trimmed_y = Nx.slice(y, [0, 0], [full, elem(Nx.shape(y), 1)])
+      Logger.info("Trimmed #{tag} samples from #{n} -> #{full} to enforce full batches (batch_size=#{batch_size})")
+      {trimmed_x, trimmed_y}
+    end
   end
 end

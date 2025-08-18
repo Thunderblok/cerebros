@@ -107,12 +107,18 @@ defmodule Cerebros.Training.TrialWorker do
     # Step 1: Build the Axon model
     {:ok, model} = Builder.build_model(spec)
 
-    # Parameter budget enforcement (pre-training). We estimate parameter count
-    # using Axon.build with synthetic inputs. If the spec exceeds the budget we
-    # short-circuit and mark the trial as skipped.
+    # Parameter budget enforcement (pre-training). This can be expensive because
+    # it requires building/initializing parameters. Allow skipping for speed.
     param_budget = Map.get(training_config, :parameter_budget, nil)
-    est_params = estimate_parameter_count(model, spec)
-    if param_budget && est_params > param_budget do
+    skip_estimation? = Map.get(training_config, :skip_param_estimation, false)
+    est_params =
+      cond do
+        skip_estimation? ->
+          Logger.debug("Trial #{trial_id}: skipping parameter estimation for speed")
+          0
+        true -> estimate_parameter_count(model, spec)
+      end
+  if param_budget && est_params > 0 && est_params > param_budget do
       Logger.info("Skipping trial #{trial_id}: parameter budget exceeded (#{est_params} > #{param_budget})")
       return_result = %{
         trial_id: trial_id,
@@ -131,12 +137,19 @@ defmodule Cerebros.Training.TrialWorker do
     else
 
     # Step 2: Load training data
-    {train_data, val_data} = load_training_data(training_config)
+    {train_data_full, val_data} = load_training_data(training_config)
+    max_batches = Map.get(training_config, :max_batches_per_epoch, nil)
+    train_data =
+      if max_batches && is_integer(max_batches) && max_batches > 0 do
+        Stream.take(train_data_full, max_batches)
+      else
+        train_data_full
+      end
 
   # (Parameter budget guard handled earlier with est_params)
 
   # Step 3: Compile the training loop
-    loop = Builder.compile_model(model, training_config)
+  loop = Builder.compile_model(model, training_config)
 
   # Step 4: Run training (Loop.trainer handles parameter initialization internally)
     Logger.info("Starting training for trial #{trial_id}")
@@ -151,7 +164,11 @@ defmodule Cerebros.Training.TrialWorker do
       |> Axon.Loop.checkpoint(event: :epoch_completed, filter: [every: 10])
 
     # Run the training
-    epochs = Map.get(training_config, :epochs, 50)
+  original_epochs = Map.get(training_config, :epochs, 50)
+  epochs = adapt_epochs(original_epochs, est_params, training_config)
+    if epochs != original_epochs do
+      Logger.info("Trial #{trial_id}: reducing epochs from #{original_epochs} -> #{epochs} (est_params=#{est_params})")
+    end
   # Initialize with an empty Axon.ModelState to avoid deprecation warning about passing a plain map
   initial_state = %Axon.ModelState{data: %{}}
     timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
@@ -194,7 +211,10 @@ defmodule Cerebros.Training.TrialWorker do
       validation_loss: validation_loss,
       model_size: count_parameters(final_params),
       spec_hash: spec_hash(spec),
-      completed_at: DateTime.utc_now() |> DateTime.to_iso8601()
+  completed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+  estimated_parameters: est_params,
+  epochs_requested: original_epochs,
+  epochs_trained: epochs
     }
   end
   end
@@ -374,5 +394,25 @@ defmodule Cerebros.Training.TrialWorker do
       params = init_fn.(input_map, Axon.ModelState.empty())
       count_parameters(params)
     rescue _ -> 0 end
+  end
+
+  # Heuristic epoch adaptation to avoid wall clock timeouts on pure interpreter backends.
+  # If EXLA (or any JIT backend) is not loaded, large parameter counts can make epochs very slow.
+  # We scale epochs down based on parameter buckets unless the user explicitly set :disable_epoch_adaptation.
+  defp adapt_epochs(epochs, _est_params, training_config) when epochs <= 1, do: epochs
+  defp adapt_epochs(epochs, est_params, training_config) do
+    disable? = Map.get(training_config, :disable_epoch_adaptation, false)
+    timeout_ms = Map.get(training_config, :wall_clock_timeout_ms, :infinity)
+    exla_loaded? = Code.ensure_loaded?(EXLA.Backend)
+    cond do
+      disable? -> epochs
+      exla_loaded? -> epochs
+      timeout_ms == :infinity -> epochs
+      est_params < 50_000 -> min(epochs, 8)
+      est_params < 150_000 -> min(epochs, 6)
+      est_params < 300_000 -> min(epochs, 4)
+      est_params < 600_000 -> min(epochs, 3)
+      true -> min(epochs, 2)
+    end
   end
 end

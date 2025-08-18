@@ -38,9 +38,11 @@ defmodule Cerebros.MixProject do
       # Neural network framework
   # Keep Axon/Nx/EXLA versions in sync. Scholar requires Nx >= 0.9
   {:nx, "~> 0.9"},
-  # Temporarily disable EXLA to allow tests that don't need the NIF to run without libnccl
-  # Re-enable once CUDA/NCCL is installed or CPU-only EXLA build succeeds.
-  # {:exla, "~> 0.9"},
+  # Re-enabled EXLA (JIT) for CPU/GPU acceleration. Build with:
+  #   EXLA_TARGET=host mix deps.compile exla   (CPU)
+  #   EXLA_TARGET=cuda mix deps.compile exla   (NVIDIA GPU)
+  # If CUDA devices absent, prefer host target to avoid load errors.
+  {:exla, "~> 0.9"},
   {:axon, "~> 0.7"},
   # Optimizers (used in Builder.compile_model)
   {:polaris, "~> 0.1"},

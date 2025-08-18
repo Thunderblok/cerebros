@@ -10,7 +10,9 @@ defmodule Cerebros.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       docs: docs(),
-      dialyzer: dialyzer()
+  dialyzer: dialyzer(),
+  releases: releases(),
+  escript: escript()
     ]
   end
 
@@ -87,5 +89,18 @@ defmodule Cerebros.MixProject do
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
       plt_add_apps: [:mix, :ex_unit]
     ]
+  end
+
+  defp releases do
+    [
+      cerebros: [
+        include_executables_for: [:unix],
+        steps: [:assemble]
+      ]
+    ]
+  end
+
+  defp escript do
+    [main_module: Cerebros.CLI]
   end
 end

@@ -1,0 +1,10 @@
+# Ignore build artifacts
+/_build
+/deps
+/priv/plts
+/test
+/tmp
+.git
+.gitignore
+README.md
+README_ELIXIR.md

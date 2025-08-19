@@ -1356,4 +1356,95 @@ defmodule Cerebros do
 
   defp maybe_put_non_nil(map, _k, nil), do: map
   defp maybe_put_non_nil(map, k, v), do: Map.put(map, k, v)
+
+  @doc """
+  Demonstrate numeric ODE integration (pendulum) using `Cerebros.Sim.ODE`.
+
+  Options:
+    * :theta0 (default :math.pi()/3) initial angle
+    * :omega0 (default 0.0) initial angular velocity
+    * :t_end  (default 10.0)
+    * :dt     (default 0.01)
+    * :method (:euler | :rk4, default :euler)
+    * :g_over_l (default 1.0)
+    * :record_every (default 1) keep every k-th state
+
+  Returns map with times, states, final_state, energy_over_time (Nx tensor).
+  """
+  def demo_pendulum(opts \\ []) do
+    alias Cerebros.Sim.ODE
+    theta0 = Keyword.get(opts, :theta0, :math.pi()/3)
+    omega0 = Keyword.get(opts, :omega0, 0.0)
+    t_end  = Keyword.get(opts, :t_end, 10.0)
+    dt     = Keyword.get(opts, :dt, 0.01)
+    method = Keyword.get(opts, :method, :euler)
+    g_over_l = Keyword.get(opts, :g_over_l, 1.0)
+    record_every = Keyword.get(opts, :record_every, 1)
+
+    init = Nx.tensor([theta0, omega0], type: :f32)
+    sys = ODE.pendulum_fun(g_over_l)
+    res = ODE.integrate(init, 0.0, t_end, dt, sys, method, record_every)
+    energies =
+      res.states
+      |> Nx.to_batched(1)
+      |> Enum.map(fn batch ->
+        st = Nx.squeeze(batch)
+        ODE.pendulum_energy(st, g_over_l)
+      end)
+      |> Nx.stack()
+    Map.put(res, :energy_over_time, energies)
+  end
+
+  @doc """
+  Demonstrate Lorenz attractor integration.
+
+  Options:
+    * :sigma (10.0)
+    * :rho (28.0)
+    * :beta (8/3)
+    * :t_end (30.0)
+    * :dt (0.01) or if :steps provided uses uniform steps across span
+    * :steps (nil) number of steps (overrides :dt)
+    * :method (:rk4 default)
+    * :record_every (1)
+    * :adaptive (false) if true, uses integrate_adaptive/.. with :tol (default 1e-4)
+    * :tol (1.0e-4) tolerance for adaptive
+
+  Returns integration map plus :spark_x, :spark_y, :spark_z sparklines.
+  """
+  def demo_lorenz(opts \\ []) do
+    alias Cerebros.Sim.ODE
+    sigma = Keyword.get(opts, :sigma, 10.0)
+    rho = Keyword.get(opts, :rho, 28.0)
+    beta = Keyword.get(opts, :beta, 8.0/3.0)
+    t_end = Keyword.get(opts, :t_end, 30.0)
+    dt = Keyword.get(opts, :dt, 0.01)
+    steps = Keyword.get(opts, :steps, nil)
+    method = Keyword.get(opts, :method, :rk4)
+    record_every = Keyword.get(opts, :record_every, 1)
+    adaptive? = Keyword.get(opts, :adaptive, false)
+    tol = Keyword.get(opts, :tol, 1.0e-4)
+
+    init = Nx.tensor([1.0, 0.0, 0.0], type: :f32)
+    fun = ODE.lorenz_fun(sigma, rho, beta)
+    res =
+      if adaptive? do
+        ODE.integrate_adaptive(init, 0.0, t_end, fun, tol: tol, dt0: dt)
+      else
+        cond do
+          steps -> ODE.integrate_n_steps(init, 0.0, t_end, steps, fun, method, record_every)
+          true -> ODE.integrate(init, 0.0, t_end, dt, fun, method, record_every)
+        end
+      end
+    xs = res.states[[.., 0]]
+    ys = res.states[[.., 1]]
+    zs = res.states[[.., 2]]
+    {sx, _, _} = ODE.ascii_sparkline(xs)
+    {sy, _, _} = ODE.ascii_sparkline(ys)
+    {sz, _, _} = ODE.ascii_sparkline(zs)
+    res
+    |> Map.put(:spark_x, sx)
+    |> Map.put(:spark_y, sy)
+    |> Map.put(:spark_z, sz)
+  end
 end

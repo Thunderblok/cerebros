@@ -9,7 +9,7 @@ defmodule Cerebros.Architecture.Spec do
 
   alias __MODULE__
 
-  @type unit_type :: :dense | :real_neuron
+  @type unit_type :: :dense | :real_neuron | :positronic
   @type activation :: :relu | :elu | :tanh | :sigmoid | :leaky_relu | :gelu | :swish
   @type merge_strategy :: :concatenate | :add | :multiply
 
@@ -128,7 +128,9 @@ defmodule Cerebros.Architecture.Spec do
       |> Keyword.get(:round_neurons, :none)
       |> Cerebros.Architecture.Rounding.parse()
 
-    unit_type = Keyword.get(opts, :unit_type, :dense)
+  unit_type = Keyword.get(opts, :unit_type, :dense)
+  positronic_branching = Keyword.get(opts, :positronic_branching, 3)
+  positronic_resonance = Keyword.get(opts, :positronic_resonance, :none)
 
     levels =
       0..(num_levels - 1)
@@ -144,14 +146,14 @@ defmodule Cerebros.Architecture.Spec do
             activation = random_activation()
 
             case unit_type do
-              :dense ->
-                %{
-                  unit_id: unit_id,
-                  neurons: neurons,
-                  activation: activation,
-                  dendrites: nil,
-                  dendrite_activation: nil
-                }
+              :dense -> %{
+                unit_id: unit_id,
+                neurons: neurons,
+                activation: activation,
+                dendrites: nil,
+                dendrite_activation: nil,
+                mode: :standard
+              }
               :real_neuron ->
                 dendrites = :rand.uniform(5) + 1
                 %{
@@ -159,7 +161,21 @@ defmodule Cerebros.Architecture.Spec do
                   neurons: neurons,
                   activation: activation,
                   dendrites: dendrites,
-                  dendrite_activation: random_activation()
+                  dendrite_activation: random_activation(),
+                  mode: :multi_dendrite
+                }
+              :positronic ->
+                # Positronic unit: branching dendrites with optional resonance modulation
+                dendrites = max(1, round(:math.pow(positronic_branching, 0.5 + :rand.uniform())))
+                resonance = resolve_positronic_resonance(positronic_resonance)
+                %{
+                  unit_id: unit_id,
+                  neurons: neurons,
+                  activation: activation,
+                  dendrites: dendrites,
+                  dendrite_activation: random_activation(),
+                  resonance: resonance,
+                  mode: :positronic
                 }
             end
           end)
@@ -181,7 +197,7 @@ defmodule Cerebros.Architecture.Spec do
       connectivity_config: connectivity_config,
       merge_config: Keyword.get(opts, :merge_config, nil),
       training_config: Keyword.get(opts, :training_config, %{}),
-      metadata: %{generated_at: DateTime.utc_now(), rounding_strategy: rounding_strategy}
+  metadata: %{generated_at: DateTime.utc_now(), rounding_strategy: rounding_strategy, positronic: unit_type == :positronic}
     }
   end
 
@@ -364,4 +380,12 @@ defmodule Cerebros.Architecture.Spec do
     activations = [:relu, :elu, :tanh, :sigmoid, :leaky_relu, :gelu, :swish]
     Enum.random(activations)
   end
+
+  defp resolve_positronic_resonance(:none), do: nil
+  defp resolve_positronic_resonance(:phi_harmonics), do: :multi_scale_modulation
+  defp resolve_positronic_resonance(:golden_gate), do: :gated_nonlinearity
+  defp resolve_positronic_resonance(:multi_scale_modulation), do: :multi_scale_modulation
+  defp resolve_positronic_resonance(:gated_nonlinearity), do: :gated_nonlinearity
+  defp resolve_positronic_resonance(fun) when is_function(fun, 1), do: fun
+  defp resolve_positronic_resonance(_), do: nil
 end

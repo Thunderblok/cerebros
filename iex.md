@@ -131,3 +131,34 @@ GPU (if available): export XLA_TARGET=cuda export NVIDIA_VISIBLE_DEVICES=all iex
 
 Force CPU EXLA: export EXLA_TARGET=host iex -S mix
 
+34. Positronic / Golden Ratio spice demo
+# Generate a positronic architecture using golden ratio rounding and phi harmonics resonance
+cfg = %{
+	minimum_skip_connection_depth: 1,
+	maximum_skip_connection_depth: 5,
+	predecessor_affinity_factor_first: 4.0,
+	predecessor_affinity_factor_main: 0.6,
+	predecessor_affinity_factor_decay: fn d -> :math.pow(0.88, d) end,
+	lateral_connection_probability: 0.18,
+	lateral_connection_decay: fn d -> :math.pow(0.94, d) end,
+	max_consecutive_lateral_connections: 3,
+	gate_after_n_lateral_connections: 2,
+	gate_activation: :sigmoid,
+	gating_mode: :multiplicative
+}
+positronic_spec = Cerebros.Architecture.Spec.random(cfg,
+	seed: 424242,
+	min_levels: 2,
+	max_levels: 5,
+	min_units_per_level: 1,
+	max_units_per_level: 3,
+	min_neurons_per_unit: 8,
+	max_neurons_per_unit: 96,
+	round_neurons: :phi,
+	unit_type: :positronic,
+	positronic_branching: 4,
+	positronic_resonance: :phi_harmonics
+)
+{:ok, model} = Cerebros.Networks.Builder.build_model(positronic_spec)
+IO.puts("Positronic model constructed ✅")
+

@@ -109,7 +109,7 @@ defmodule Cerebros.Networks.Builder do
   end
   defp ensure_dynamic_batch(other), do: other
 
-  defp build_level(level, spec, connectivity, prev_layers, layer_map) do
+  defp build_level(level, spec, connectivity, _prev_layers, layer_map) do
     # Build all units in this level
     {level_layers, updated_map} =
       level.units
@@ -145,7 +145,7 @@ defmodule Cerebros.Networks.Builder do
     # Determine merge strategy from spec.merge_config.strategy_pool (random pick for diversity)
     {strategy, merged_input, input_count} =
       case input_layers do
-        [] -> {:identity, hd(input_layers), 0}
+        [] -> raise "No input layers available for merge"
         [single] -> {:identity, single, 1}
         many ->
           merge_cfg = spec.merge_config || %{}
@@ -167,6 +167,7 @@ defmodule Cerebros.Networks.Builder do
     case level.unit_type do
       :dense -> build_dense_unit(normalized, unit, level)
       :real_neuron -> build_real_neuron_unit(normalized, unit, level)
+      :positronic -> build_positronic_unit(normalized, unit, level)
     end
   end
 
@@ -240,9 +241,7 @@ defmodule Cerebros.Networks.Builder do
   # Axon activations take tensors, we build a small anonymous wrapper.
   defp safe_gate(gate_fun, lateral) when is_function(gate_fun, 1) do
     # Apply a dense identity if lateral is not yet projected? For now just clamp.
-    clamped = Axon.layer(lateral, fn x, _params, _state ->
-      Nx.clip(x, -40.0, 40.0)
-    end, name: :gate_clamp)
+  clamped = Axon.nx(lateral, fn x -> Nx.clip(x, -40.0, 40.0) end, name: :gate_clamp)
     gate_fun.(clamped)
   end
   defp safe_gate(_other, lateral), do: lateral
@@ -285,18 +284,11 @@ defmodule Cerebros.Networks.Builder do
     end
   end
 
-  defp apply_normalization(input, :batch_norm) do
-    Axon.batch_norm(input)
-  end
-  defp apply_normalization(input, :layer_norm) do
-    Axon.layer_norm(input)
-  end
-  defp apply_normalization(input, :dropout) do
-    Axon.dropout(input, rate: 0.2)
-  end
-  defp apply_normalization(input, :none) do
-    input
-  end
+  # Normalization helpers kept for future use (currently disabled to reduce numerical issues on small tensors)
+  # defp apply_normalization(input, :batch_norm), do: Axon.batch_norm(input)
+  # defp apply_normalization(input, :layer_norm), do: Axon.layer_norm(input)
+  # defp apply_normalization(input, :dropout), do: Axon.dropout(input, rate: 0.2)
+  # defp apply_normalization(input, :none), do: input
 
   defp build_dense_unit(input, unit, level) do
     activation = get_activation_fn(unit.activation)
@@ -369,6 +361,86 @@ defmodule Cerebros.Networks.Builder do
           Enum.reduce(rest, first, fn layer, acc -> Axon.concatenate(acc, layer, axis: -1) end)
       end
     end
+  end
+
+  defp build_positronic_unit(input, unit, level) do
+    # Positronic: two-phase transform: core + resonance modulation over concatenated dendrites.
+    activation = get_activation_fn(unit.activation)
+    core =
+      input
+      |> Axon.dense(unit.neurons, name: "positronic_core_#{level.level_number}_#{unit.unit_id}")
+      |> activation.()
+
+    dendrite_count = unit.dendrites || 1
+    dendrite_activation = get_activation_fn(unit.dendrite_activation || unit.activation)
+
+    dendrites =
+      1..dendrite_count
+      |> Enum.map(fn d_id ->
+        share = max(1, div(unit.neurons + dendrite_count - 1, dendrite_count))
+        core
+        |> Axon.dense(share, name: "positronic_branch_#{level.level_number}_#{unit.unit_id}_#{d_id}")
+        |> dendrite_activation.()
+      end)
+
+    merged =
+      case dendrites do
+        [single] -> single
+        many -> merge_inputs(many, :concatenate)
+      end
+
+    modulated = apply_resonance(merged, unit)
+
+    if level.is_final do
+      # Final projection remains as-is; Axon model builder will still enforce final output shape.
+      modulated
+    else
+      modulated
+    end
+  end
+
+  defp apply_resonance(layer, %{resonance: nil}), do: layer
+  # Legacy resonance names (:phi_harmonics, :golden_gate) mapped to neutral terms
+  defp apply_resonance(layer, %{resonance: :phi_harmonics}), do: apply_resonance(layer, %{resonance: :multi_scale_modulation})
+  defp apply_resonance(layer, %{resonance: :golden_gate}), do: apply_resonance(layer, %{resonance: :gated_nonlinearity})
+  defp apply_resonance(layer, %{resonance: :multi_scale_modulation}) do
+    Axon.nx(layer, fn x ->
+      base = (1 + :math.sqrt(5.0)) / 2.0
+      scales = Nx.tensor([1.0, base, base * base])
+      shape = Nx.shape(x)
+      # flatten trailing dims except batch
+      rank = tuple_size(shape)
+  {_batch, flat_shape, restore} =
+        case rank do
+          2 -> {elem(shape, 0), {elem(shape, 0), elem(shape, 1)}, fn y -> y end}
+          _ ->
+            batch = elem(shape, 0)
+            flat = Enum.reduce(1..(rank-1), 1, fn i, acc -> acc * elem(shape, i) end)
+            {batch, {batch, flat}, fn y -> Nx.reshape(y, shape) end}
+        end
+      x2d = Nx.reshape(x, flat_shape)
+      cols = elem(Nx.shape(x2d), 1)
+      reps = div(cols + 2, 3)
+      full = Nx.tile(scales, [reps]) |> Nx.slice_along_axis(0, cols)
+      mod = Nx.sin(x2d * full)
+      restore.(mod)
+    end, name: :multi_scale_modulation)
+  end
+  defp apply_resonance(layer, %{resonance: :gated_nonlinearity}) do
+    Axon.nx(layer, fn x ->
+      # Fast GELU approx: 0.5 * x * (1 + erf(x / sqrt(2)))
+      gelu = 0.5 * x * (1.0 + Nx.erf(x / :math.sqrt(2.0)))
+      gate = Nx.sigmoid(gelu)
+      gate * x
+    end, name: :gated_nonlinearity)
+  end
+  defp apply_resonance(layer, %{resonance: fun}) when is_function(fun, 1) do
+    Axon.nx(layer, fn x ->
+      try do
+        fun.(x)
+      rescue _ -> x
+      end
+    end, name: :custom_resonance)
   end
 
   defp get_activation_fn(:relu), do: &Axon.relu/1
@@ -453,18 +525,19 @@ defmodule Cerebros.Networks.Builder do
   end
   defp attach_metric(loop, _unknown), do: loop
 
-  defp add_custom_metrics(loop, []), do: loop
-  defp add_custom_metrics(loop, [metric | rest]) do
-    loop
-    |> Axon.Loop.metric(metric)
-    |> add_custom_metrics(rest)
-  end
+  # Custom metrics attachment (retained for future extension)
+  # defp add_custom_metrics(loop, []), do: loop
+  # defp add_custom_metrics(loop, [metric | rest]) do
+  #   loop
+  #   |> Axon.Loop.metric(metric)
+  #   |> add_custom_metrics(rest)
+  # end
 
   @doc """
   Visualizes the model architecture using Axon's built-in visualization.
   """
   @spec visualize_model(axon_model(), keyword()) :: String.t()
-  def visualize_model(model, opts \\ []) do
+  def visualize_model(_model, _opts \\ []) do
     # This would generate a DOT representation of the graph
     # Axon doesn't have built-in visualization yet, but we can implement
     # a simple graph representation

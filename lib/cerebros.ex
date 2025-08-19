@@ -107,6 +107,60 @@ defmodule Cerebros do
   end
 
   @doc """
+  Quick positronic demo: builds a positronic architecture spec and model with optional neuron count rounding.
+
+  Options (keyword list):
+    :seed (default 424242)
+    :min_levels (2)
+    :max_levels (5)
+    :min_units_per_level (1)
+    :max_units_per_level (3)
+    :min_neurons_per_unit (8)
+    :max_neurons_per_unit (96)
+    :positronic_branching (4)
+  :positronic_resonance (:multi_scale_modulation | :gated_nonlinearity | function | :none)
+  :round_neurons (:growth_series | :power_of_two | {:multiple_of, k} | :none)
+  Returns {:ok, %{spec: spec, model: model, param_count: n}} or {:error, reason}.
+  """
+  def demo_positronic(opts \\ []) do
+    seed = Keyword.get(opts, :seed, 424242)
+    conn_cfg = %{
+      minimum_skip_connection_depth: 1,
+      maximum_skip_connection_depth: 5,
+      predecessor_affinity_factor_first: 4.0,
+      predecessor_affinity_factor_main: 0.6,
+      predecessor_affinity_factor_decay: fn d -> :math.pow(0.88, d) end,
+      lateral_connection_probability: 0.18,
+      lateral_connection_decay: fn d -> :math.pow(0.94, d) end,
+      max_consecutive_lateral_connections: 3,
+      gate_after_n_lateral_connections: 2,
+      gate_activation: :sigmoid,
+      gating_mode: :multiplicative
+    }
+
+    spec = Cerebros.Architecture.Spec.random(conn_cfg,
+      seed: seed,
+      min_levels: Keyword.get(opts, :min_levels, 2),
+      max_levels: Keyword.get(opts, :max_levels, 5),
+      min_units_per_level: Keyword.get(opts, :min_units_per_level, 1),
+      max_units_per_level: Keyword.get(opts, :max_units_per_level, 3),
+      min_neurons_per_unit: Keyword.get(opts, :min_neurons_per_unit, 8),
+      max_neurons_per_unit: Keyword.get(opts, :max_neurons_per_unit, 96),
+  round_neurons: Keyword.get(opts, :round_neurons, :growth_series),
+      unit_type: :positronic,
+      positronic_branching: Keyword.get(opts, :positronic_branching, 4),
+  positronic_resonance: Keyword.get(opts, :positronic_resonance, :multi_scale_modulation)
+    )
+
+    case Cerebros.Networks.Builder.build_model(spec) do
+      {:ok, model} ->
+        pc = Cerebros.Utils.ParamCount.parameter_count(model)
+        {:ok, %{spec: spec, model: model, param_count: pc}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
   Test the system with Ames housing data, similar to the original Cerebros example.
   This demonstrates regression on real-world data.
   """
@@ -1197,4 +1251,109 @@ defmodule Cerebros do
     end
     mode
   end
+
+  @doc """
+  Run a compact pipeline: short NAS search -> Ising simulation -> second NAS search.
+
+  This is meant for interactive experimentation/visualization loops where you want
+  to: (1) exercise the NAS engine quickly, (2) step a physical / lattice model for
+  a bit (warming up any visualization tooling), then (3) resume another small NAS run.
+
+  Options (keyword list):
+    :first_trials              (default 2)    – total trials (architectures * per-arch) for first NAS
+    :second_trials             (default 2)    – same for second NAS
+    :epochs                    (default 1)    – epochs per trial (both runs; override per run via :first_spec / :second_spec)
+    :first_spec                (default %{})  – map merged into the first `run_search/1` spec
+    :second_spec               (default %{})  – map merged into the second spec
+    :ising_size                (default 32)   – Ising lattice size (n x n)
+    :ising_temperature         (default 2.2)
+    :ising_sweeps              (default 20)   – number of full sweeps (≈ n^2 proposals each)
+    :ising_proposals_per_call  (default nil)  – passed through to `Ising2D.sweep/2` if provided
+    :include_lattice           (default false) – include final lattice tensor in return (avoid for large n)
+    :seed                      (default nil) – seed forwarded to NAS specs (if provided)
+
+  Return shape:
+    {:ok, %{
+       first_run: map(),
+       ising: %{energy: float, magnetization: float, size: n, temperature: t, sweeps: k, step: int, lattice?: Nx.t()},
+       second_run: map()
+    }} | {:error, reason}
+
+  Notes:
+    * Lattice not included unless :include_lattice true.
+    * If first NAS run fails, the pipeline halts early.
+    * Uses synthetic dataset defaults unless you override via :first_spec / :second_spec (e.g. :dataset).
+  """
+  def nas_ising_nas(opts \\ []) do
+    alias Cerebros.Sim.Ising2D
+
+    first_trials = Keyword.get(opts, :first_trials, 2)
+    second_trials = Keyword.get(opts, :second_trials, 2)
+    epochs = Keyword.get(opts, :epochs, 1)
+    seed = Keyword.get(opts, :seed, nil)
+
+    base_spec = %{
+      trials: nil, # fill per run
+      epochs: epochs
+    }
+
+    first_spec_over = Keyword.get(opts, :first_spec, %{})
+    second_spec_over = Keyword.get(opts, :second_spec, %{})
+
+    first_spec =
+      base_spec
+      |> Map.put(:trials, first_trials)
+      |> maybe_put_non_nil(:seed, seed)
+      |> Map.merge(Map.new(first_spec_over))
+
+    second_spec =
+      base_spec
+      |> Map.put(:trials, second_trials)
+      |> maybe_put_non_nil(:seed, seed)
+      |> Map.merge(Map.new(second_spec_over))
+
+    IO.puts("🧪 [Pipeline] Starting first NAS run (trials=#{first_trials}, epochs=#{first_spec[:epochs]}) ...")
+    first_res = Cerebros.API.run_search(first_spec)
+    case first_res do
+      {:error, reason} -> {:error, {:first_run_failed, reason}}
+      {:ok, first_map} ->
+        IO.puts("✅ [Pipeline] First NAS run complete – best_metric=#{inspect(first_map.best_metric)}")
+
+        # --- Ising simulation phase ---
+        ising_size = Keyword.get(opts, :ising_size, 32)
+        ising_temp = Keyword.get(opts, :ising_temperature, 2.2)
+        sweeps = Keyword.get(opts, :ising_sweeps, 20)
+        proposals_per_call = Keyword.get(opts, :ising_proposals_per_call, nil)
+        include_lattice = Keyword.get(opts, :include_lattice, false)
+
+        IO.puts("🧲 [Pipeline] Running Ising simulation (n=#{ising_size}, T=#{ising_temp}, sweeps=#{sweeps}) ...")
+        state = Ising2D.new(ising_size, ising_temp)
+        state = Enum.reduce(1..sweeps, state, fn _, st -> Ising2D.sweep(st, proposals_per_call) end)
+        e = Ising2D.energy(state.lattice) |> Nx.to_number()
+        m = Ising2D.magnetization(state.lattice) |> Nx.to_number()
+        IO.puts("   Ising final: energy=#{Float.round(e, 4)} magnetization=#{Float.round(m, 4)}")
+        ising_info = %{
+          size: ising_size,
+          temperature: ising_temp,
+          sweeps: sweeps,
+          step: state.step,
+          energy: e,
+          magnetization: m
+        }
+        ising_info = if include_lattice, do: Map.put(ising_info, :lattice, state.lattice), else: ising_info
+
+        # --- Second NAS run ---
+        IO.puts("🚀 [Pipeline] Starting second NAS run (trials=#{second_trials}, epochs=#{second_spec[:epochs]}) ...")
+        second_res = Cerebros.API.run_search(second_spec)
+        case second_res do
+          {:error, reason2} -> {:error, {:second_run_failed, reason2, %{first_run: first_map, ising: ising_info}}}
+          {:ok, second_map} ->
+            IO.puts("🏁 [Pipeline] Second NAS run complete – best_metric=#{inspect(second_map.best_metric)}")
+            {:ok, %{first_run: first_map, ising: ising_info, second_run: second_map}}
+        end
+    end
+  end
+
+  defp maybe_put_non_nil(map, _k, nil), do: map
+  defp maybe_put_non_nil(map, k, v), do: Map.put(map, k, v)
 end

@@ -27,6 +27,10 @@ Thumbs.db
 # Local scripts outputs (if any)
 /tmp/
 
+# Training artifacts (not needed in VCS)
+/checkpoint/
+/results/
+
 # Ignore Python reference folder (user requested to ignore)
 /cerebros-core-algorithm-alpha-main/
 

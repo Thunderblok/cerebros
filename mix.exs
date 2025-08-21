@@ -50,9 +50,9 @@ defmodule Cerebros.MixProject do
   # Optimizers (used in Builder.compile_model)
   {:polaris, "~> 0.1"},
 
-      # Data processing
-      {:explorer, "~> 0.8"},
-      {:scholar, "~> 0.2"},
+  # Data processing (Explorer removed in Thunderline integration due to rustler conflict with ex_sctp)
+  # Optional: re-add Explorer when rustler versions align.
+  {:scholar, "~> 0.2"},
 
       # Concurrency and distributed systems
       {:broadway, "~> 1.0"},

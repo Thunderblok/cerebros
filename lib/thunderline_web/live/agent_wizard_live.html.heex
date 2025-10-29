@@ -1,0 +1,188 @@
+<div class="min-h-screen bg-gradient-to-br from-[#3B1E5E] to-[#1F1F24] text-white">
+  <div class="max-w-4xl mx-auto px-6 py-8">
+    <%!-- Header --%>
+    <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-4">
+        <img src="/images/cerebros-logo.svg" alt="Cerebros" class="h-12 w-auto" />
+        <h1 class="text-2xl font-bold">Create AI Assistant</h1>
+      </div>
+      <a href="/dashboard" class="text-gray-400 hover:text-white transition">
+        ← Back to Dashboard
+      </a>
+    </div>
+
+    <%= if @step == :welcome do %>
+      <%!-- Welcome Screen --%>
+      <div class="flex flex-col items-center justify-center py-20">
+        <div class="text-center mb-8">
+          <div class="text-8xl mb-6">🤖</div>
+          <h2 class="text-4xl font-bold mb-4">Let's Create Your AI Assistant</h2>
+          <p class="text-xl text-gray-300 mb-8">
+            I'll guide you through a simple process to customize your assistant with your unique knowledge and style.
+          </p>
+        </div>
+        <button
+          phx-click="start_wizard"
+          class="px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg font-bold text-lg transition-all transform hover:scale-105"
+        >
+          Get Started
+        </button>
+      </div>
+    <% else %>
+      <%!-- Chat Interface --%>
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 overflow-hidden">
+        <%!-- Messages Area --%>
+        <div class="h-96 overflow-y-auto p-6 space-y-4" id="messages-container" phx-hook="ScrollToBottom">
+          <%= for message <- @messages do %>
+            <div class={[
+              "flex",
+              if(message.role == :assistant, do: "justify-start", else: "justify-end")
+            ]}>
+              <div class={[
+                "max-w-[80%] rounded-lg p-4",
+                if(message.role == :assistant,
+                  do: "bg-violet-600/30 text-white",
+                  else: "bg-white/20 text-white"
+                )
+              ]}>
+                <p class="text-sm"><%= message.content %></p>
+                <p class="text-xs text-gray-400 mt-2">
+                  <%= Calendar.strftime(message.timestamp, "%I:%M %p") %>
+                </p>
+              </div>
+            </div>
+          <% end %>
+
+          <%= if @uploading do %>
+            <div class="flex justify-start">
+              <div class="max-w-[80%] rounded-lg p-4 bg-violet-600/30 text-white">
+                <p class="text-sm">Processing your files...</p>
+                <div class="mt-2">
+                  <div class="animate-pulse flex space-x-2">
+                    <div class="h-2 w-2 bg-white rounded-full"></div>
+                    <div class="h-2 w-2 bg-white rounded-full"></div>
+                    <div class="h-2 w-2 bg-white rounded-full"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Upload Area --%>
+        <%= if @step != :complete do %>
+          <div class="border-t border-white/20 p-6">
+            <form phx-submit="upload_documents" phx-change="validate_upload">
+              <div class="mb-4">
+                <label class="block text-sm font-semibold mb-2">
+                  <%= case @step do %>
+                    <% :prompts -> %>
+                      Upload Example Prompts
+                    <% :references -> %>
+                      Upload Reference Documents
+                    <% :communications -> %>
+                      Upload Example Communications
+                    <% :procedures -> %>
+                      Upload Procedure Data
+                  <% end %>
+                </label>
+
+                <div
+                  class="border-2 border-dashed border-white/30 rounded-lg p-8 text-center hover:border-violet-400/50 transition cursor-pointer"
+                  phx-drop-target={@uploads.document.ref}
+                >
+                  <div class="text-4xl mb-2">📁</div>
+                  <p class="text-gray-300 mb-2">Drop files here or click to browse</p>
+                  <p class="text-xs text-gray-400">Supports: TXT, PDF, DOC, DOCX, CSV, JSON, XML (max 50MB)</p>
+
+                  <.live_file_input upload={@uploads.document} class="hidden" />
+
+                  <label for={@uploads.document.ref} class="cursor-pointer">
+                    <span class="inline-block mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded transition">
+                      Select Files
+                    </span>
+                  </label>
+                </div>
+
+                <%!-- Show selected files --%>
+                <%= for entry <- @uploads.document.entries do %>
+                  <div class="mt-2 flex items-center justify-between bg-white/5 rounded p-2">
+                    <span class="text-sm"><%= entry.client_name %></span>
+                    <button
+                      type="button"
+                      phx-click="cancel_upload"
+                      phx-value-ref={entry.ref}
+                      class="text-red-400 hover:text-red-300"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <%!-- Progress bar --%>
+                  <div class="mt-1 bg-white/10 rounded-full h-2">
+                    <div
+                      class="bg-violet-600 h-2 rounded-full transition-all"
+                      style={"width: #{entry.progress}%"}
+                    >
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+
+              <div class="flex gap-4">
+                <button
+                  type="submit"
+                  disabled={@uploads.document.entries == []}
+                  class="flex-1 px-6 py-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold transition"
+                >
+                  Upload & Continue
+                </button>
+                <button
+                  type="button"
+                  phx-click="skip_step"
+                  class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-lg transition"
+                >
+                  Skip for Now
+                </button>
+              </div>
+            </form>
+          </div>
+        <% else %>
+          <%!-- Complete Step --%>
+          <div class="border-t border-white/20 p-6 text-center">
+            <button
+              phx-click="finish"
+              class="px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg font-bold text-lg transition-all transform hover:scale-105"
+            >
+              Complete Setup
+            </button>
+          </div>
+        <% end %>
+      </div>
+
+      <%!-- Progress Indicator --%>
+      <div class="mt-8 flex justify-center gap-2">
+        <%= for step <- [:prompts, :references, :communications, :procedures, :complete] do %>
+          <div class={[
+            "h-2 w-12 rounded-full transition-all",
+            if(step_index(step) <= step_index(@step),
+              do: "bg-violet-600",
+              else: "bg-white/20"
+            )
+          ]}>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<script>
+  // Auto-scroll chat to bottom
+  window.addEventListener("phx:update", () => {
+    const container = document.getElementById("messages-container");
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  });
+</script>

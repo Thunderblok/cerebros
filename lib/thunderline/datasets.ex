@@ -13,5 +13,7 @@ defmodule Thunderline.Datasets do
 
   resources do
     resource Thunderline.Datasets.Upload
+    resource Thunderline.Datasets.Agent
+    resource Thunderline.Datasets.AgentDocument
   end
 end

@@ -42,6 +42,9 @@ defmodule ThunderlineWeb.Router do
       #
       # If an authenticated user must *not* be present:
       # on_mount {ThunderlineWeb.LiveUserAuth, :live_no_user}
+
+      live "/dashboard", DashboardLive
+      live "/agents/new", AgentWizardLive
     end
 
     post "/rpc/run", AshTypescriptRpcController, :run

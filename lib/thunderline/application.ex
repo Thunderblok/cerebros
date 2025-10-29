@@ -11,11 +11,19 @@ defmodule Thunderline.Application do
       ThunderlineWeb.Telemetry,
       Thunderline.Repo,
       {DNSCluster, query: Application.get_env(:thunderline, :dns_cluster_query) || :ignore},
+      {Oban,
+       AshOban.config(
+         Application.fetch_env!(:thunderline, :ash_domains),
+         Application.fetch_env!(:thunderline, Oban)
+       )},
       {Phoenix.PubSub, name: Thunderline.PubSub},
       # Start a worker by calling: Thunderline.Worker.start_link(arg)
       # {Thunderline.Worker, arg},
       # Start to serve requests, typically the last entry
-      ThunderlineWeb.Endpoint
+      ThunderlineWeb.Endpoint,
+      {Absinthe.Subscription, ThunderlineWeb.Endpoint},
+      AshGraphql.Subscription.Batcher,
+      {AshAuthentication.Supervisor, [otp_app: :thunderline]}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

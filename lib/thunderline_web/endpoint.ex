@@ -1,5 +1,6 @@
 defmodule ThunderlineWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :thunderline
+  use Absinthe.Phoenix.Endpoint
 
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
@@ -15,6 +16,8 @@ defmodule ThunderlineWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  socket "/ws/gql", ThunderlineWeb.GraphqlSocket, websocket: true, longpoll: true
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
@@ -26,12 +29,23 @@ defmodule ThunderlineWeb.Endpoint do
     gzip: not code_reloading?,
     only: ThunderlineWeb.static_paths()
 
+  if Code.ensure_loaded?(Tidewave) do
+    plug Tidewave
+  end
+
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do
+    plug AshAi.Mcp.Dev,
+      # For many tools, you will need to set the `protocol_version_statement` to the older version.
+      protocol_version_statement: "2024-11-05",
+      otp_app: :thunderline,
+      path: "/ash_ai/mcp"
+
     socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
     plug Phoenix.LiveReloader
     plug Phoenix.CodeReloader
+    plug AshPhoenix.Plug.CheckCodegenStatus
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :thunderline
   end
 
@@ -43,7 +57,7 @@ defmodule ThunderlineWeb.Endpoint do
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
+    parsers: [:urlencoded, :multipart, :json, Absinthe.Plug.Parser, AshJsonApi.Plug.Parser],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
 

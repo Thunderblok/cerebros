@@ -1,4 +1,5 @@
 import Config
+config :ash, policies: [show_policy_breakdowns?: true]
 
 # Configure your database
 config :thunderline, Thunderline.Repo,
@@ -64,7 +65,7 @@ config :thunderline, ThunderlineWeb.Endpoint,
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :thunderline, dev_routes: true
+config :thunderline, dev_routes: true, token_signing_secret: "jzQVVdLO8LEgTjcJnEC3xcltop3yhyQc"
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

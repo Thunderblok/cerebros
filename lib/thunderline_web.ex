@@ -85,7 +85,7 @@ defmodule ThunderlineWeb do
       # HTML escaping functionality
       import Phoenix.HTML
       # Core UI components
-      import ThunderlineWeb.CoreComponents
+      use ThunderlineWeb.Components.MishkaComponents
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

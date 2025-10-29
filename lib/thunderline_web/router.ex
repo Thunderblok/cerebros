@@ -31,18 +31,8 @@ defmodule ThunderlineWeb.Router do
   scope "/", ThunderlineWeb do
     pipe_through :browser
 
-    ash_authentication_live_session :authenticated_routes do
-      # in each liveview, add one of the following at the top of the module:
-      #
-      # If an authenticated user must be present:
-      # on_mount {ThunderlineWeb.LiveUserAuth, :live_user_required}
-      #
-      # If an authenticated user *may* be present:
-      # on_mount {ThunderlineWeb.LiveUserAuth, :live_user_optional}
-      #
-      # If an authenticated user must *not* be present:
-      # on_mount {ThunderlineWeb.LiveUserAuth, :live_no_user}
-
+    # Skip authentication for now - direct access to dashboard and wizard
+    live_session :public_routes do
       live "/dashboard", DashboardLive
       live "/agents/new", AgentCreationWizardLive
     end
@@ -76,7 +66,8 @@ defmodule ThunderlineWeb.Router do
   scope "/", ThunderlineWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    # Redirect home to dashboard (skip auth for now)
+    get "/", PageController, :redirect_to_dashboard
     auth_routes AuthController, Thunderline.Accounts.User, path: "/auth"
     sign_out_route AuthController
 

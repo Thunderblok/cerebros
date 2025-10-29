@@ -2,16 +2,18 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
   use ThunderlineWeb, :live_view
   require Ash.Query
 
-  on_mount {ThunderlineWeb.LiveUserAuth, :live_user_required}
+  # Skip authentication for now
+  # on_mount {ThunderlineWeb.LiveUserAuth, :live_user_required}
 
   @impl true
   def mount(_params, _session, socket) do
+    # Start at step 2 (Review Data) to match the reference UI
     {:ok,
      socket
-     |> assign(:current_step, 0)
+     |> assign(:current_step, 2)
      |> assign(:agent, nil)
      |> assign(:uploaded_files, [])
-     |> assign(:synthetic_samples, [])
+     |> assign(:synthetic_samples, load_sample_data())
      |> assign(:selected_samples, [])
      |> assign(:messages, [])
      |> assign(:show_review, false)
@@ -25,9 +27,9 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
 
   @impl true
   def handle_event("start_wizard", %{"assistant_name" => name}, socket) do
-    case Thunderline.Datasets.Agent.create(%{
+    # Skip user ID requirement for now
+    case Ash.create(Thunderline.Datasets.Agent, %{
            name: name,
-           user_id: socket.assigns.current_user.id,
            status: :step1_work_products,
            current_step: 1
          }) do
@@ -107,7 +109,8 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
   def handle_event("approve_samples", _params, socket) do
     # Update status of selected samples
     Enum.each(socket.assigns.selected_samples, fn sample_id ->
-      {:ok, _} = Thunderline.Datasets.AgentDocument.update(sample_id, %{status: :approved})
+      doc = Ash.get!(Thunderline.Datasets.AgentDocument, sample_id)
+      Ash.update!(doc, %{status: :approved})
     end)
 
     {:noreply,
@@ -141,7 +144,8 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
           {:ready, "Training complete! Your personalized assistant is ready."}
       end
 
-    Thunderline.Datasets.Agent.update(socket.assigns.agent.id, %{
+    agent = Ash.get!(Thunderline.Datasets.Agent, socket.assigns.agent.id)
+    Ash.update!(agent, %{
       status: status,
       current_step: next_step
     })
@@ -210,7 +214,8 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
         :timer.sleep(5000)
         progress = div((index + 1) * 100, length(stages))
 
-        Thunderline.Datasets.Agent.update(agent_id, %{
+        agent = Ash.get!(Thunderline.Datasets.Agent, agent_id)
+        Ash.update!(agent, %{
           status: stage,
           training_progress: progress
         })
@@ -245,5 +250,28 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
     current_index = Enum.find_index(stages, &(&1 == current_status)) || -1
     stage_index = Enum.find_index(stages, &(&1 == stage)) || 999
     current_index >= stage_index
+  end
+
+  defp load_sample_data do
+    [
+      %{
+        id: 1,
+        prompt: "Write a professional paragraph about cloud computing benefits for a business proposal",
+        reasoning: "Focus on business value, cost efficiency, and scalability. Use formal tone.",
+        output: "Cloud computing offers transformative advantages for modern enterprises. By leveraging scalable infrastructure and pay-as-you-go models, organizations can significantly reduce capital expenditure while maintaining operational flexibility. This technology enables seamless collaboration across distributed teams and provides robust disaster recovery capabilities."
+      },
+      %{
+        id: 2,
+        prompt: "Create a casual introduction paragraph for a tech blog post about AI",
+        reasoning: "Use conversational tone, make it engaging and accessible. Avoid jargon.",
+        output: "Hey there! Let's talk about artificial intelligence - and no, we're not diving into scary robot takeover scenarios. AI is actually becoming a pretty cool tool that's making our daily lives easier in ways you might not even notice. From your phone's autocorrect to Netflix recommendations, it's everywhere."
+      },
+      %{
+        id: 3,
+        prompt: "Generate a descriptive paragraph about a mountain landscape for travel content",
+        reasoning: "Use vivid imagery, sensory details, and evocative language to create atmosphere.",
+        output: "The jagged peaks pierce through wisps of morning clouds, their snow-capped summits gleaming in the golden sunlight. Ancient pine forests cascade down the slopes like emerald waterfalls, while crystal-clear streams carve their way through valleys below. The crisp mountain air carries the scent of wildflowers and distant adventure."
+      }
+    ]
   end
 end

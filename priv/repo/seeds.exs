@@ -9,3 +9,17 @@
 #
 # We recommend using the bang functions (`insert!`, `update!`
 # and so on) as they will fail if something goes wrong.
+
+alias Thunderline.Accounts.User
+
+# Add mo@okoracle.com to the database
+# Since we don't have a basic create action, we'll insert directly into the repo
+case Thunderline.Repo.insert(%User{email: "mo@okoracle.com"}) do
+  {:ok, user} ->
+    IO.puts("✅ User created successfully!")
+    IO.puts("   Email: #{user.email}")
+    IO.puts("   ID: #{user.id}")
+
+  {:error, changeset} ->
+    IO.puts("❌ Error creating user: #{inspect(changeset)}")
+end

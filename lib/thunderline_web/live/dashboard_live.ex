@@ -2,11 +2,12 @@ defmodule ThunderlineWeb.DashboardLive do
   use ThunderlineWeb, :live_view
   require Ash.Query
 
-  on_mount {ThunderlineWeb.LiveUserAuth, :live_user_required}
+  # Skip authentication for now
+  # on_mount {ThunderlineWeb.LiveUserAuth, :live_user_required}
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, load_agents(socket)}
+    {:ok, assign(socket, agents: [])}
   end
 
   @impl true
@@ -21,14 +22,7 @@ defmodule ThunderlineWeb.DashboardLive do
   end
 
   defp load_agents(socket) do
-    user = socket.assigns.current_user
-
-    agents =
-      Thunderline.Datasets.Agent
-      |> Ash.Query.for_read(:for_user, %{user_id: user.id})
-      |> Ash.Query.sort(created_at: :desc)
-      |> Ash.read!()
-
-    assign(socket, agents: agents)
+    # Skip auth for now - return empty list
+    assign(socket, agents: [])
   end
 end

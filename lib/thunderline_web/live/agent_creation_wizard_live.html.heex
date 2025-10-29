@@ -1,213 +1,156 @@
-<div class="min-h-screen bg-gradient-to-br from-[#3B1E5E] to-[#1F1F24] text-white">
-  <!-- Header -->
-  <div class="bg-white/10 backdrop-blur-lg border-b border-white/20">
-    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-      <div class="flex items-center gap-4">
-        <img src="/images/cerebros-logo.svg" alt="Cerebros" class="h-12 w-auto" />
-        <h1 class="text-xl font-bold">Create Your Personal Assistant</h1>
-      </div>
-      <.link navigate="/dashboard" class="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition">
-        Back to Dashboard
-      </.link>
+<div class="w-full min-h-screen bg-gray-50 p-8">
+  <div class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <.link navigate="/dashboard" class="flex items-center text-gray-600 hover:text-gray-900 mb-6">
+      <span class="mr-2">←</span>
+      Back to Dashboard
+    </.link>
+
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">
+        Create Your AI Assistant
+      </h1>
+      <p class="text-gray-600">
+        Follow these steps to personalize your assistant with your unique work style
+      </p>
     </div>
-  </div>
 
-  <div class="max-w-6xl mx-auto px-6 py-8">
-    <%= if @current_step == 0 do %>
-      <!-- Welcome Screen -->
-      <div class="text-center max-w-2xl mx-auto">
-        <div class="mb-8">
-          <div class="text-6xl mb-4">👋</div>
-          <h2 class="text-3xl font-bold mb-4">Welcome to Cerebros</h2>
-          <p class="text-xl text-gray-300 mb-6">
-            Let's create your personalized AI assistant. I'll guide you through a 5-step process to collect the data needed to train an assistant that truly understands your work style and needs.
-          </p>
-        </div>
-
-        <form phx-submit="start_wizard" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium mb-2">What should we call your assistant?</label>
-            <input
-              type="text"
-              name="assistant_name"
-              required
-              placeholder="e.g., My Work Assistant"
-              class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-white placeholder-gray-400"
-            />
-          </div>
-          <button
-            type="submit"
-            class="w-full px-8 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 rounded-lg font-bold text-lg transition transform hover:scale-105"
-          >
-            Start Creating
-          </button>
-        </form>
-      </div>
-    <% else %>
-      <!-- Progress Indicator -->
-      <div class="mb-8">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium">Step <%= @current_step %> of 5</span>
-          <span class="text-sm text-gray-400">
-            <%= case @current_step do %>
-              <% 1 -> %>Upload Work Products
-              <% 2 -> %>Questions & Answers
-              <% 3 -> %>Communication Examples
-              <% 4 -> %>Reference Materials
-              <% 5 -> %>Training in Progress
-              <% _ -> %>Complete
-            <% end %>
-          </span>
-        </div>
-        <div class="w-full bg-white/10 rounded-full h-2">
-          <div class="bg-gradient-to-r from-emerald-500 to-cyan-500 h-2 rounded-full transition-all duration-500" style={"width: #{@current_step * 20}%"}></div>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-3 gap-6">
-        <!-- Chat Area -->
-        <div class="col-span-2 bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 flex flex-col h-[600px]">
-          <div class="p-4 border-b border-white/20">
-            <h3 class="font-bold">Assistant Guide</h3>
-          </div>
-
-          <!-- Messages -->
-          <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messages-container" phx-update="append">
-            <%= for msg <- @messages do %>
-              <div class={"flex #{if msg.sender == :assistant, do: "justify-start", else: "justify-end"}"}>
-                <div class={"max-w-[80%] px-4 py-3 rounded-lg #{if msg.sender == :assistant, do: "bg-violet-600/30", else: "bg-emerald-600/30"}"}>
-                  <p class="text-sm"><%= msg.content %></p>
-                  <span class="text-xs text-gray-400 mt-1 block">
-                    <%= Calendar.strftime(msg.timestamp, "%I:%M %p") %>
-                  </span>
-                </div>
-              </div>
-            <% end %>
-          </div>
-        </div>
-
-        <!-- Action Panel -->
-        <div class="col-span-1 space-y-4">
-          <%= if @show_review do %>
-            <!-- Sample Review -->
-            <div class="bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 p-4">
-              <h3 class="font-bold mb-4">Review Synthetic Samples</h3>
-              <div class="space-y-3 max-h-[400px] overflow-y-auto">
-                <%= for sample <- @synthetic_samples do %>
-                  <div class="bg-white/5 rounded p-3 cursor-pointer hover:bg-white/10 transition" phx-click="toggle_sample" phx-value-sample_id={sample.id}>
-                    <div class="flex items-start gap-2">
-                      <input type="checkbox" checked={sample.id in @selected_samples} class="mt-1" />
-                      <div class="flex-1">
-                        <p class="text-sm font-medium"><%= sample.original_filename %></p>
-                        <%= if sample.synthetic_prompt do %>
-                          <p class="text-xs text-gray-400 mt-1">Prompt: <%= String.slice(sample.synthetic_prompt, 0..50) %>...</p>
-                        <% end %>
-                      </div>
-                    </div>
-                  </div>
-                <% end %>
-              </div>
-              <button
-                phx-click="approve_samples"
-                class="w-full mt-4 px-4 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 rounded-lg font-bold transition"
-              >
-                Approve Selected
-              </button>
+    <!-- Step Navigation -->
+    <div class="flex items-center justify-between mb-12">
+      <%= for {step, idx} <- Enum.with_index([
+        %{num: 1, label: "Work Products", sublabel: "Upload example documents"},
+        %{num: 2, label: "Review Data", sublabel: "Add training examples"},
+        %{num: 3, label: "Communications", sublabel: "Upload conversations"},
+        %{num: 4, label: "References", sublabel: "Add knowledge base"},
+        %{num: 5, label: "Training", sublabel: "Build your assistant"}
+      ]) do %>
+        <div class="flex items-center flex-1">
+          <div class="flex flex-col items-center">
+            <div class={"w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold #{if step.num == @current_step, do: "bg-blue-600", else: "bg-gray-300"}"}>
+              <%= step.num %>
             </div>
-          <% else %>
-            <!-- Upload Area -->
-            <div class="bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 p-4">
-              <h3 class="font-bold mb-4">
-                <%= case @current_step do %>
-                  <% 1 -> %>Upload Work Products
-                  <% 2 -> %>Upload Q&A Examples
-                  <% 3 -> %>Upload Communications
-                  <% 4 -> %>Upload References
-                  <% _ -> %>Processing...
-                <% end %>
-              </h3>
-
-              <%= if @current_step < 5 do %>
-                <form phx-submit={"upload_#{get_step_action(@current_step)}"} phx-change="validate">
-                  <div
-                    class="border-2 border-dashed border-white/20 rounded-lg p-8 text-center hover:border-emerald-400/50 transition cursor-pointer"
-                    phx-drop-target={@uploads.documents.ref}
-                  >
-                    <div class="text-4xl mb-2">📄</div>
-                    <p class="text-sm text-gray-300 mb-2">Drop files here or click to browse</p>
-                    <p class="text-xs text-gray-400">PDF, Word, TXT, CSV, JSON (max 50MB)</p>
-
-                    <label class="cursor-pointer">
-                      <.live_file_input upload={@uploads.documents} class="hidden" />
-                    </label>
-                  </div>
-
-                  <!-- Preview Uploaded Files -->
-                  <%= for entry <- @uploads.documents.entries do %>
-                    <div class="mt-2 flex items-center gap-2 bg-white/5 rounded p-2">
-                      <div class="flex-1">
-                        <p class="text-sm"><%= entry.client_name %></p>
-                        <div class="w-full bg-white/10 rounded-full h-1 mt-1">
-                          <div class="bg-emerald-500 h-1 rounded-full" style={"width: #{entry.progress}%"}></div>
-                        </div>
-                      </div>
-                      <button type="button" phx-click="cancel-upload" phx-value-ref={entry.ref} class="text-red-400 hover:text-red-300">
-                        ✕
-                      </button>
-                    </div>
-                  <% end %>
-
-                  <%= if @uploads.documents.entries != [] do %>
-                    <button
-                      type="submit"
-                      class="w-full mt-4 px-4 py-2 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-400 hover:to-purple-400 rounded-lg font-bold transition"
-                    >
-                      Upload & Process
-                    </button>
-                  <% end %>
-                </form>
-
-                <%= if @uploaded_files != [] do %>
-                  <div class="mt-4 space-y-2">
-                    <button
-                      phx-click="review_samples"
-                      class="w-full px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition"
-                    >
-                      Review Synthetic Samples
-                    </button>
-                    <button
-                      phx-click="next_step"
-                      class="w-full px-4 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 rounded-lg font-bold transition"
-                    >
-                      Continue to Next Step →
-                    </button>
-                  </div>
-                <% end %>
-              <% else %>
-                <!-- Training Progress -->
-                <div class="space-y-4">
-                  <div class="text-center py-8">
-                    <div class="text-6xl mb-4 animate-spin">⚙️</div>
-                    <p class="text-lg font-bold mb-2">Training Your Assistant</p>
-                    <p class="text-sm text-gray-400">This may take several minutes...</p>
-                  </div>
-
-                  <div class="space-y-2">
-                    <%= if @agent do %>
-                      <%= for {stage, label} <- training_stages() do %>
-                        <div class={"flex items-center gap-2 text-sm #{if stage_completed?(@agent.status, stage), do: "text-emerald-400", else: "text-gray-500"}"}>
-                          <span><%= if stage_completed?(@agent.status, stage), do: "✓", else: "○" %></span>
-                          <span><%= label %></span>
-                        </div>
-                      <% end %>
-                    <% end %>
-                  </div>
-                </div>
-              <% end %>
+            <div class="mt-2 text-center">
+              <div class="font-semibold text-sm text-gray-900">
+                <%= step.label %>
+              </div>
+              <div class="text-xs text-gray-500"><%= step.sublabel %></div>
             </div>
+          </div>
+          <%= if idx < 4 do %>
+            <div class="flex-1 h-0.5 bg-gray-300 mx-4 mt-[-40px]"></div>
           <% end %>
         </div>
+      <% end %>
+    </div>
+
+    <!-- Main Content -->
+    <div class="bg-white rounded-lg shadow-sm p-8">
+      <div class="mb-6">
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">
+          Review Data
+        </h2>
+        <p class="text-gray-600">
+          Add example prompts and their expected responses. This helps train your AI assistant to understand your preferences.
+        </p>
       </div>
-    <% end %>
+
+      <!-- Column Headers -->
+      <div class="grid grid-cols-12 gap-4 mb-4">
+        <div class="col-span-4">
+          <h3 class="font-semibold text-gray-900">Example Prompts</h3>
+        </div>
+        <div class="col-span-4">
+          <h3 class="font-semibold text-gray-900">Example Reasoning Path</h3>
+        </div>
+        <div class="col-span-4">
+          <h3 class="font-semibold text-gray-900">Example Final Product</h3>
+        </div>
+      </div>
+
+      <!-- Example Rows -->
+      <div class="space-y-4">
+        <%= for {example, index} <- Enum.with_index(@synthetic_samples) do %>
+          <div class="grid grid-cols-12 gap-4 p-4 border border-gray-200 rounded-lg">
+            <!-- Prompt Column -->
+            <div class="col-span-4">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700">
+                  Example <%= index + 1 %>
+                </span>
+              </div>
+              <p class="text-sm text-gray-600">
+                <%= example.prompt %>
+              </p>
+            </div>
+
+            <!-- Reasoning Column -->
+            <div class="col-span-4">
+              <div class="mb-2">
+                <span class="text-sm font-medium text-gray-700 invisible">
+                  Placeholder
+                </span>
+              </div>
+              <div class="bg-blue-50 p-3 rounded">
+                <p class="text-sm text-gray-600">
+                  <%= example.reasoning %>
+                </p>
+              </div>
+            </div>
+
+            <!-- Output Column -->
+            <div class="col-span-4">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700 invisible">
+                  Placeholder
+                </span>
+                <div class="flex gap-2">
+                  <button
+                    phx-click="edit_example"
+                    phx-value-id={example.id}
+                    class="text-blue-600 hover:text-blue-700"
+                    title="Edit"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  <button
+                    phx-click="delete_example"
+                    phx-value-id={example.id}
+                    class="text-red-600 hover:text-red-700"
+                    title="Delete"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="bg-green-50 p-3 rounded">
+                <p class="text-sm text-gray-700">
+                  <%= example.output %>
+                </p>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex justify-between items-center mt-8 pt-6 border-t border-gray-200">
+        <button
+          phx-click="back_step"
+          class="px-6 py-2 text-gray-600 hover:text-gray-900"
+        >
+          Back
+        </button>
+        <button
+          phx-click="next_step"
+          class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
   </div>
 </div>

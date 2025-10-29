@@ -10,6 +10,11 @@ defmodule ThunderlineWeb.PageController do
     end
   end
 
+  def redirect_to_dashboard(conn, _params) do
+    # Skip authentication - go directly to dashboard
+    redirect(conn, to: "/dashboard")
+  end
+
   def index(conn, _params) do
     render(conn, :index)
   end

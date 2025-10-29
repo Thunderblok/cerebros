@@ -42,7 +42,7 @@ defmodule Thunderline.Datasets.Upload do
   def load_csv_preview(file_path, limit \\ 5) do
     require Explorer.DataFrame
 
-    case Explorer.DataFrame.from_csv(file_path, dtypes: :auto) do
+    case Explorer.DataFrame.from_csv(file_path) do
       {:ok, df} -> Explorer.DataFrame.head(df, limit)
       {:error, reason} -> {:error, reason}
     end

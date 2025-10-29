@@ -37,13 +37,20 @@ defmodule ThunderlineWeb.UploadController do
     file_path = Path.join(["priv", "uploads", filename])
 
     case Upload.load_csv_preview(file_path, 5) do
-      df when is_struct(df) ->
-        json(conn, %{status: "ok", preview: Explorer.DataFrame.collect(df)})
+      df when is_struct(df, Explorer.DataFrame) ->
+        # Convert DataFrame to list of maps for JSON serialization
+        preview_data = Explorer.DataFrame.to_rows(df)
+        json(conn, %{status: "ok", preview: preview_data})
 
       {:error, reason} ->
         conn
         |> put_status(:bad_request)
         |> json(%{status: "error", message: inspect(reason)})
     end
+  rescue
+    e ->
+      conn
+      |> put_status(:internal_server_error)
+      |> json(%{status: "error", message: Exception.message(e)})
   end
 end

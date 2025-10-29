@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
+  <defs>
+    <linearGradient id="brainGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4FC3F7;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#7B68EE;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#BA68C8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Brain made of hexagons (simplified representation) -->
+  <g transform="translate(250, 50)">
+    <!-- Left side (cyan/blue) -->
+    <polygon points="30,20 40,14 50,20 50,32 40,38 30,32" fill="#4FC3F7" opacity="0.9"/>
+    <polygon points="50,20 60,14 70,20 70,32 60,38 50,32" fill="#4FC3F7" opacity="0.85"/>
+    <polygon points="70,20 80,14 90,20 90,32 80,38 70,32" fill="#4FC3F7" opacity="0.8"/>
+    <polygon points="40,40 50,34 60,40 60,52 50,58 40,52" fill="#5DADE2" opacity="0.9"/>
+    <polygon points="60,40 70,34 80,40 80,52 70,58 60,52" fill="#5DADE2" opacity="0.85"/>
+    <polygon points="80,40 90,34 100,40 100,52 90,58 80,52" fill="#5DADE2" opacity="0.8"/>
+    <polygon points="100,40 110,34 120,40 120,52 110,58 100,52" fill="#5DADE2" opacity="0.75"/>
+    
+    <!-- Center (purple/indigo) -->
+    <polygon points="90,60 100,54 110,60 110,72 100,78 90,72" fill="#7B68EE" opacity="0.95"/>
+    <polygon points="110,60 120,54 130,60 130,72 120,78 110,72" fill="#7B68EE" opacity="0.9"/>
+    <polygon points="100,80 110,74 120,80 120,92 110,98 100,92" fill="#7B68EE" opacity="0.9"/>
+    <polygon points="80,80 90,74 100,80 100,92 90,98 80,92" fill="#7B68EE" opacity="0.85"/>
+    
+    <!-- Right side (purple/magenta) -->
+    <polygon points="130,60 140,54 150,60 150,72 140,78 130,72" fill="#9B59B6" opacity="0.9"/>
+    <polygon points="150,60 160,54 170,60 170,72 160,78 150,72" fill="#9B59B6" opacity="0.85"/>
+    <polygon points="140,80 150,74 160,80 160,92 150,98 140,92" fill="#BA68C8" opacity="0.9"/>
+    <polygon points="160,80 170,74 180,80 180,92 170,98 160,92" fill="#BA68C8" opacity="0.85"/>
+    <polygon points="180,80 190,74 200,80 200,92 190,98 180,92" fill="#BA68C8" opacity="0.8"/>
+    <polygon points="150,100 160,94 170,100 170,112 160,118 150,112" fill="#C48BC8" opacity="0.85"/>
+    <polygon points="170,100 180,94 190,100 190,112 180,118 170,112" fill="#C48BC8" opacity="0.8"/>
+    
+    <!-- Additional detail hexagons -->
+    <polygon points="50,60 60,54 70,60 70,72 60,78 50,72" fill="#5DADE2" opacity="0.7"/>
+    <polygon points="70,60 80,54 90,60 90,72 80,78 70,72" fill="#5DADE2" opacity="0.75"/>
+    <polygon points="60,80 70,74 80,80 80,92 70,98 60,92" fill="#7B68EE" opacity="0.7"/>
+  </g>
+  
+  <!-- Cerebros text -->
+  <text x="160" y="230" font-family="Georgia, serif" font-size="72" font-weight="normal" fill="#666666">Cerebros</text>
+  
+  <!-- Tagline -->
+  <text x="160" y="270" font-family="Georgia, serif" font-size="20" font-style="italic" fill="#5DADE2">One world, one family, one algorithm</text>
+</svg>

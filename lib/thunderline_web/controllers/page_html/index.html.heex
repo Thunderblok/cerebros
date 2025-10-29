@@ -1,43 +1,70 @@
 <div class="min-h-screen bg-gradient-to-br from-[#3B1E5E] to-[#1F1F24] text-white">
-  <div class="max-w-5xl mx-auto px-6 py-16">
-    <div class="text-center mb-16">
-      <h1 class="text-6xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-emerald-400">
-        Cerebros API
+  <div class="max-w-6xl mx-auto px-6 py-12">
+    <div class="text-center mb-12">
+      <div class="mb-6">
+        <img src="/images/cerebros-logo.svg" alt="Cerebros - One world, one family, one algorithm" class="mx-auto h-48 w-auto" />
+      </div>
+      <h1 class="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-emerald-400">
+        Custom AI Assistants in Hours, Not Months
       </h1>
-      <p class="text-xl text-gray-300">Multi-stage Upload Intelligence Backend</p>
-      <p class="text-sm text-gray-400 mt-2">🚀 Server Running on Port 4000</p>
+      <p class="text-xl text-gray-300 max-w-3xl mx-auto">Fully customize your AI assistant as a specialist at the core, not just adapt a generalist to a specialist. Build enterprise-grade AI solutions at a trivial cost.</p>
+      <p class="text-sm text-gray-400 mt-4">🚀 API Server Running on Port 4000</p>
     </div>
 
-    <div class="grid md:grid-cols-2 gap-6 mb-12">
-      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20">
-        <h2 class="text-2xl font-bold mb-4 flex items-center gap-2">
-          📤 Upload Endpoint
-        </h2>
-        <p class="text-gray-300 mb-4">POST multipart/form-data CSV files</p>
-        <code class="block bg-black/40 p-3 rounded text-sm overflow-x-auto">
-          POST /api/uploads
-        </code>
-        <div class="mt-4 text-xs text-gray-400">
-          <p>Response: JSON with status and filename</p>
-        </div>
+    <div class="grid md:grid-cols-3 gap-6 mb-12">
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 hover:border-violet-400/50 transition-all">
+        <div class="text-4xl mb-4">⚡</div>
+        <h2 class="text-xl font-bold mb-3">Rapid Development</h2>
+        <p class="text-gray-300 text-sm">Deploy custom AI solutions in hours instead of months with our automated SDLC platform.</p>
       </div>
 
-      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20">
-        <h2 class="text-2xl font-bold mb-4 flex items-center gap-2">
-          👁️ Preview Endpoint
-        </h2>
-        <p class="text-gray-300 mb-4">GET CSV preview (first 5 rows)</p>
-        <code class="block bg-black/40 p-3 rounded text-sm overflow-x-auto">
-          GET /api/uploads/preview/:filename
-        </code>
-        <div class="mt-4 text-xs text-gray-400">
-          <p>Response: JSON array of row objects</p>
-        </div>
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 hover:border-emerald-400/50 transition-all">
+        <div class="text-4xl mb-4">💰</div>
+        <h2 class="text-xl font-bold mb-3">Cost Effective</h2>
+        <p class="text-gray-300 text-sm">Customize a [not so] large language model at the foundation model level for as little as $75.</p>
+      </div>
+
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 hover:border-blue-400/50 transition-all">
+        <div class="text-4xl mb-4">🤖</div>
+        <h2 class="text-xl font-bold mb-3">Custom AI Assistants</h2>
+        <p class="text-gray-300 text-sm">We customize AI assistants at the foundation model level so it actively fits your specific business needs.</p>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-6 mb-12">
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 hover:border-purple-400/50 transition-all">
+        <div class="text-4xl mb-4">✍️</div>
+        <h2 class="text-xl font-bold mb-3">Brand Voice</h2>
+        <p class="text-gray-300 text-sm">Your assistant that writes how your organization writes.</p>
+      </div>
+
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 hover:border-red-400/50 transition-all">
+        <div class="text-4xl mb-4">🔒</div>
+        <h2 class="text-xl font-bold mb-3">Enterprise Security</h2>
+        <p class="text-gray-300 text-sm">Defense-grade security with TLS service mesh, mTLS, and secure Kubernetes.</p>
+      </div>
+
+      <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 hover:border-cyan-400/50 transition-all">
+        <div class="text-4xl mb-4">🧠</div>
+        <h2 class="text-xl font-bold mb-3">Neuromorphic AI</h2>
+        <p class="text-gray-300 text-sm">Software-level Neuromorphic language model for efficient training, fast inference, and low cost.</p>
       </div>
     </div>
 
     <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 mb-8">
-      <h2 class="text-2xl font-bold mb-4">🔧 Developer Tools</h2>
+      <h2 class="text-2xl font-bold mb-4">🔧 Developer API Endpoints</h2>
+      <div class="grid md:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="font-bold text-lg mb-2 text-violet-400">📤 Upload Endpoint</h3>
+          <p class="text-gray-300 text-sm mb-2">POST multipart/form-data CSV files</p>
+          <code class="block bg-black/40 p-3 rounded text-sm overflow-x-auto">POST /api/uploads</code>
+        </div>
+        <div>
+          <h3 class="font-bold text-lg mb-2 text-emerald-400">👁️ Preview Endpoint</h3>
+          <p class="text-gray-300 text-sm mb-2">GET CSV preview (first 5 rows)</p>
+          <code class="block bg-black/40 p-3 rounded text-sm overflow-x-auto">GET /api/uploads/preview/:filename</code>
+        </div>
+      </div>
       <div class="grid md:grid-cols-3 gap-4">
         <a href="/gql/playground" class="block p-4 bg-violet-600/30 hover:bg-violet-600/50 rounded transition">
           <div class="font-bold">GraphQL Playground</div>
@@ -54,16 +81,59 @@
       </div>
     </div>
 
-    <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20">
-      <h2 class="text-2xl font-bold mb-4">🎯 Quick Test</h2>
-      <p class="text-gray-300 mb-4">Test the upload API with curl:</p>
-      <pre class="bg-black/40 p-4 rounded text-sm overflow-x-auto"><code>curl -X POST http://localhost:4000/api/uploads \
-  -F "file=@yourfile.csv"</code></pre>
+    <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 mb-8">
+      <h2 class="text-2xl font-bold mb-4">💼 Pricing</h2>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div class="text-center p-6 bg-gradient-to-br from-violet-600/20 to-blue-600/20 rounded-lg">
+          <div class="text-3xl font-bold mb-2">$20/mo</div>
+          <div class="text-sm text-gray-300">per user</div>
+          <div class="mt-2 text-gray-400">Base subscription</div>
+        </div>
+        <div class="text-center p-6 bg-gradient-to-br from-emerald-600/20 to-cyan-600/20 rounded-lg">
+          <div class="text-3xl font-bold mb-2">Starting at $75</div>
+          <div class="text-sm text-gray-300">one-time</div>
+          <div class="mt-2 text-gray-400">Train a fully customized assistant</div>
+        </div>
+      </div>
     </div>
 
-    <div class="text-center mt-12 text-gray-400 text-sm">
-      <p>Frontend: React app at <code class="bg-black/40 px-2 py-1 rounded">/home/mo/llm-ui</code></p>
-      <p class="mt-2">Repository: <code class="bg-black/40 px-2 py-1 rounded">github.com/Thunderblok/cerebros</code></p>
+    <div class="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/20 mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-center">🔐 Security</h2>
+      <div class="grid md:grid-cols-3 gap-6 text-center">
+        <div>
+          <div class="text-3xl mb-2">🛡️</div>
+          <p class="text-gray-300 text-sm">Military Grade Security</p>
+        </div>
+        <div>
+          <div class="text-3xl mb-2">🔒</div>
+          <p class="text-gray-300 text-sm">We never access your data or use it to train models other than yours</p>
+        </div>
+        <div>
+          <div class="text-3xl mb-2">🔐</div>
+          <p class="text-gray-300 text-sm">TLS / mTLS, data encrypted at rest and in transit</p>
+        </div>
+      </div>
+      <div class="text-center mt-6">
+        <a href="https://cerebros-automl-platform.trustshare.com/home" target="_blank" class="text-cyan-400 hover:text-cyan-300 text-sm">
+          Track our SOC II Progress →
+        </a>
+      </div>
+    </div>
+
+    <div class="text-center mt-12">
+      <h2 class="text-3xl font-bold mb-4">Be part of the future of AI</h2>
+      <div class="flex flex-wrap justify-center gap-4 mb-8">
+        <a href="https://cerebros.one/#sign-up" target="_blank" class="px-6 py-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg font-bold transition">
+          Apply for Waiting List
+        </a>
+        <a href="mailto:david@cerebros.one" class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-lg font-bold transition">
+          Contact: david@cerebros.one
+        </a>
+      </div>
+      <div class="text-gray-400 text-sm">
+        <p>API Repository: <code class="bg-black/40 px-2 py-1 rounded">github.com/Thunderblok/cerebros</code></p>
+        <p class="mt-2">Visit: <a href="https://cerebros.one" target="_blank" class="text-cyan-400 hover:text-cyan-300">cerebros.one</a></p>
+      </div>
     </div>
   </div>
 </div>

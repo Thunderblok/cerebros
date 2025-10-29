@@ -38,8 +38,36 @@ defmodule Thunderline.Datasets.Agent do
     end
 
     attribute :status, :atom do
-      constraints one_of: [:draft, :collecting_prompts, :collecting_references, :collecting_communications, :collecting_procedures, :processing, :ready]
+      constraints one_of: [
+        :draft,
+        :step1_work_products,
+        :step1_review,
+        :step2_qa,
+        :step2_review,
+        :step3_communications,
+        :step3_review,
+        :step4_references,
+        :step5_training,
+        :stage1_training,
+        :stage2_training,
+        :stage3_training,
+        :stage4_training,
+        :stage5_personalization,
+        :deploying,
+        :ready,
+        :failed
+      ]
       default :draft
+      allow_nil? false
+    end
+
+    attribute :current_step, :integer do
+      default 0
+      allow_nil? false
+    end
+
+    attribute :training_progress, :integer do
+      default 0
       allow_nil? false
     end
 

@@ -44,7 +44,7 @@ defmodule ThunderlineWeb.Router do
       # on_mount {ThunderlineWeb.LiveUserAuth, :live_no_user}
 
       live "/dashboard", DashboardLive
-      live "/agents/new", AgentWizardLive
+      live "/agents/new", AgentCreationWizardLive
     end
 
     post "/rpc/run", AshTypescriptRpcController, :run

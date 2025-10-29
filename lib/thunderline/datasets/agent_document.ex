@@ -13,11 +13,11 @@ defmodule Thunderline.Datasets.AgentDocument do
     defaults [:read, :destroy]
 
     create :create do
-      accept [:agent_id, :document_type, :file_path, :original_filename, :status]
+      accept [:agent_id, :document_type, :file_path, :original_filename, :status, :is_synthetic, :source_document_id, :synthetic_prompt, :synthetic_reasoning, :synthetic_response]
     end
 
     update :update do
-      accept [:status, :file_path]
+      accept [:status, :file_path, :synthetic_prompt, :synthetic_reasoning, :synthetic_response]
     end
 
     read :for_agent do
@@ -40,7 +40,7 @@ defmodule Thunderline.Datasets.AgentDocument do
     end
 
     attribute :document_type, :atom do
-      constraints one_of: [:prompt, :reference, :communication, :procedure]
+      constraints one_of: [:work_product, :qa_pair, :communication, :reference]
       allow_nil? false
     end
 
@@ -53,10 +53,23 @@ defmodule Thunderline.Datasets.AgentDocument do
     end
 
     attribute :status, :atom do
-      constraints one_of: [:uploaded, :processing, :completed, :failed]
+      constraints one_of: [:uploaded, :processing, :completed, :failed, :approved, :rejected]
       default :uploaded
       allow_nil? false
     end
+
+    attribute :is_synthetic, :boolean do
+      default false
+      allow_nil? false
+    end
+
+    attribute :source_document_id, :uuid do
+      allow_nil? true
+    end
+
+    attribute :synthetic_prompt, :string
+    attribute :synthetic_reasoning, :string
+    attribute :synthetic_response, :string
 
     create_timestamp :created_at
     update_timestamp :updated_at

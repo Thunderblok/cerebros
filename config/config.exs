@@ -103,7 +103,7 @@ config :spark,
 config :thunderline,
   ecto_repos: [Thunderline.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: [Thunderline.Ledger, Thunderline.Accounts]
+  ash_domains: [Thunderline.Ledger, Thunderline.Accounts, Thunderline.Datasets]
 
 # Configures the endpoint
 config :thunderline, ThunderlineWeb.Endpoint,

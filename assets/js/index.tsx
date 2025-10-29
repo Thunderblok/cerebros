@@ -220,8 +220,10 @@ const fetchUsers = async () => {
 
 const root = createRoot(document.getElementById("app")!);
 
+import UploadFlow from "./upload_stages";
+
 root.render(
   <React.StrictMode>
-    <AshTypescriptGuide />
-  </React.StrictMode>,
+    <UploadFlow />
+  </React.StrictMode>
 );

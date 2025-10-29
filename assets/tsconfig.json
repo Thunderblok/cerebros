@@ -28,7 +28,10 @@
       "*": ["../deps/*"]
     },
     "allowJs": true,
-    "noEmit": true
+    "noEmit": true,
+    "lib": ["dom", "es2015"],
+    "moduleResolution": "node",
+    "skipLibCheck": true
   },
   "include": ["js/**/*"]
 }

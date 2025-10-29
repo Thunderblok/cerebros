@@ -112,10 +112,13 @@ defmodule ThunderlineWeb.Router do
     )
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", ThunderlineWeb do
-  #   pipe_through :api
-  # end
+  # File uploads API
+  scope "/api", ThunderlineWeb do
+    pipe_through :api
+
+    post "/uploads", UploadController, :create
+    get "/uploads/preview/:filename", UploadController, :preview
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:thunderline, :dev_routes) do

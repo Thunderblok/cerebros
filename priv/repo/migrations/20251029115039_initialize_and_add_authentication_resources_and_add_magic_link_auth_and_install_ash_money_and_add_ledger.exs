@@ -61,7 +61,8 @@ defmodule Thunderline.Repo.Migrations.InitializeAndAddAuthenticationResourcesAnd
             name: "ledger_balances_transfer_id_fkey",
             type: :binary,
             prefix: "public"
-          ), null: false
+          ),
+          null: false
 
       add :account_id, :uuid, null: false
     end

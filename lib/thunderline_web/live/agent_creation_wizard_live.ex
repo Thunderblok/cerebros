@@ -57,7 +57,7 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
         File.cp!(path, dest)
 
         {:ok, doc} =
-          Thunderline.Datasets.AgentDocument.create(%{
+          Ash.create(Thunderline.Datasets.AgentDocument, %{
             agent_id: agent_id,
             document_type: :work_product,
             file_path: dest,
@@ -153,21 +153,43 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
 
   @impl true
   def handle_event("upload_files", _params, socket) do
+    agent_id = socket.assigns.agent.id
+    current_step = socket.assigns.current_step
+    document_type = get_document_type_for_step(current_step)
+    
     uploaded_files =
       consume_uploaded_entries(socket, :documents, fn %{path: path}, entry ->
-        # For now, just track the file info
-        # In production, you'd save to storage and process
+        # Create directory structure: priv/nfs/agents/{agent_id}/{document_type}/
+        dest_dir = Path.join(["priv", "nfs", "agents", agent_id, Atom.to_string(document_type)])
+        File.mkdir_p!(dest_dir)
+        
+        # Save file with original name
+        dest_path = Path.join(dest_dir, entry.client_name)
+        File.cp!(path, dest_path)
+        
+        # Create database record
+        {:ok, doc} = Ash.create(Thunderline.Datasets.AgentDocument, %{
+          agent_id: agent_id,
+          document_type: document_type,
+          file_path: dest_path,
+          original_filename: entry.client_name,
+          status: :uploaded,
+          is_synthetic: false
+        })
+        
         {:ok, %{
+          id: doc.id,
           name: entry.client_name,
           size: entry.client_size,
-          type: entry.client_type
+          type: entry.client_type,
+          path: dest_path
         }}
       end)
 
     {:noreply,
      socket
-     |> assign(:uploaded_files, uploaded_files)
-     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded successfully!")}
+     |> assign(:uploaded_files, socket.assigns.uploaded_files ++ uploaded_files)
+     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded successfully to local NFS!")}
   end
 
   @impl true
@@ -193,12 +215,21 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
     assign(socket, :messages, messages)
   end
 
+  defp get_document_type_for_step(step) do
+    case step do
+      1 -> :work_product
+      3 -> :communication
+      4 -> :reference
+      _ -> :work_product
+    end
+  end
+
   defp generate_synthetic_work_products(agent_id, uploaded_docs) do
     # This would call your LLM API to generate synthetic samples
     # For now, we'll create placeholder synthetic samples
     Enum.each(uploaded_docs, fn doc ->
       for i <- 1..5 do
-        Thunderline.Datasets.AgentDocument.create(%{
+        Ash.create!(Thunderline.Datasets.AgentDocument, %{
           agent_id: agent_id,
           document_type: :work_product,
           file_path: "#{doc.file_path}.synthetic.#{i}",
@@ -246,16 +277,6 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
         })
       end)
     end)
-  end
-
-  defp get_step_action(step) do
-    case step do
-      1 -> "work_products"
-      2 -> "qa_pairs"
-      3 -> "communications"
-      4 -> "references"
-      _ -> "documents"
-    end
   end
 
   defp training_stages do

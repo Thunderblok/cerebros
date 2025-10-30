@@ -7,14 +7,15 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    # Start at step 2 (Review Data) to match the reference UI
+    # Start at step 1
     {:ok,
      socket
-     |> assign(:current_step, 2)
+     |> assign(:current_step, 1)
      |> assign(:agent, nil)
      |> assign(:uploaded_files, [])
-     |> assign(:synthetic_samples, load_sample_data())
+     |> assign(:synthetic_samples, [])
      |> assign(:selected_samples, [])
+     |> assign(:editing_example, nil)
      |> assign(:messages, [])
      |> assign(:show_review, false)
      |> assign(:step_data, %{})
@@ -91,6 +92,27 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
   end
 
   @impl true
+  def handle_event("edit_example", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    example = Enum.find(socket.assigns.synthetic_samples, &(&1.id == id))
+    {:noreply, assign(socket, :editing_example, example)}
+  end
+
+  @impl true
+  def handle_event("delete_example", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    updated_samples = Enum.reject(socket.assigns.synthetic_samples, &(&1.id == id))
+    {:noreply, assign(socket, :synthetic_samples, updated_samples)}
+  end
+
+  @impl true
+  def handle_event("add_example", _params, socket) do
+    # Load sample data for step 2
+    samples = if socket.assigns.synthetic_samples == [], do: load_sample_data(), else: socket.assigns.synthetic_samples
+    {:noreply, assign(socket, :synthetic_samples, samples)}
+  end
+
+  @impl true
   def handle_event("toggle_sample", %{"sample_id" => sample_id}, socket) do
     sample_id = sample_id
     selected = socket.assigns.selected_samples
@@ -120,46 +142,20 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
   end
 
   @impl true
+  def handle_event("back_step", _params, socket) do
+    prev_step = max(1, socket.assigns.current_step - 1)
+    {:noreply, assign(socket, :current_step, prev_step)}
+  end
+
+  @impl true
+  def handle_event("finish_training", _params, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/dashboard")}
+  end
+
+  @impl true
   def handle_event("next_step", _params, socket) do
-    next_step = socket.assigns.current_step + 1
-
-    {status, message} =
-      case next_step do
-        2 ->
-          {:step2_qa,
-           "Now, let's add some example questions and answers. Think about questions people typically ask you and how you respond."}
-
-        3 ->
-          {:step3_communications,
-           "Next, please upload example communication threads - emails, Slack conversations, SMS, or Discord messages."}
-
-        4 ->
-          {:step4_references,
-           "Finally, upload any reference materials you use: manuals, procedures, research papers, templates, etc."}
-
-        5 ->
-          {:step5_training, "Perfect! All data collected. I'm now starting the training process..."}
-
-        _ ->
-          {:ready, "Training complete! Your personalized assistant is ready."}
-      end
-
-    agent = Ash.get!(Thunderline.Datasets.Agent, socket.assigns.agent.id)
-    Ash.update!(agent, %{
-      status: status,
-      current_step: next_step
-    })
-
-    if next_step == 5 do
-      # Start the training pipeline
-      start_training_pipeline(socket.assigns.agent.id)
-    end
-
-    {:noreply,
-     socket
-     |> assign(:current_step, next_step)
-     |> assign(:show_review, false)
-     |> add_message(message, :assistant)}
+    next_step = min(5, socket.assigns.current_step + 1)
+    {:noreply, assign(socket, :current_step, next_step)}
   end
 
   # Helper functions

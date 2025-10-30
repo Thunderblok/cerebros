@@ -45,31 +45,67 @@
 
     <!-- Main Content -->
     <div class="bg-white rounded-lg shadow-sm p-8">
-      <div class="mb-6">
-        <h2 class="text-2xl font-bold text-gray-900 mb-2">
-          Review Data
-        </h2>
-        <p class="text-gray-600">
-          Add example prompts and their expected responses. This helps train your AI assistant to understand your preferences.
-        </p>
-      </div>
+      <%= cond do %>
+        <% @current_step == 1 -> %>
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">
+              Upload Work Products
+            </h2>
+            <p class="text-gray-600">
+              Upload examples of your work documents, reports, or any deliverables you typically create.
+            </p>
+          </div>
+          
+          <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+            <div class="text-5xl mb-4">📄</div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Drag and drop files here</h3>
+            <p class="text-gray-600 mb-4">or click to browse</p>
+            <button class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              Choose Files
+            </button>
+            <p class="text-sm text-gray-500 mt-4">
+              Supported formats: PDF, DOC, DOCX, TXT, CSV, JSON, XML, MD
+            </p>
+          </div>
 
-      <!-- Column Headers -->
-      <div class="grid grid-cols-12 gap-4 mb-4">
-        <div class="col-span-4">
-          <h3 class="font-semibold text-gray-900">Example Prompts</h3>
-        </div>
-        <div class="col-span-4">
-          <h3 class="font-semibold text-gray-900">Example Reasoning Path</h3>
-        </div>
-        <div class="col-span-4">
-          <h3 class="font-semibold text-gray-900">Example Final Product</h3>
-        </div>
-      </div>
+        <% @current_step == 2 -> %>
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">
+              Review Training Data
+            </h2>
+            <p class="text-gray-600">
+              Add example prompts and their expected responses. This helps train your AI assistant to understand your preferences.
+            </p>
+          </div>
 
-      <!-- Example Rows -->
-      <div class="space-y-4">
-        <%= for {example, index} <- Enum.with_index(@synthetic_samples) do %>
+          <%= if @synthetic_samples == [] do %>
+            <div class="text-center py-12">
+              <div class="text-5xl mb-4">✨</div>
+              <p class="text-gray-600 mb-4">No training examples yet. Add some to get started!</p>
+              <button
+                phx-click="add_example"
+                class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Add Sample Examples
+              </button>
+            </div>
+          <% else %>
+            <!-- Column Headers -->
+            <div class="grid grid-cols-12 gap-4 mb-4">
+              <div class="col-span-4">
+                <h3 class="font-semibold text-gray-900">Example Prompts</h3>
+              </div>
+              <div class="col-span-4">
+                <h3 class="font-semibold text-gray-900">Example Reasoning Path</h3>
+              </div>
+              <div class="col-span-4">
+                <h3 class="font-semibold text-gray-900">Example Final Product</h3>
+              </div>
+            </div>
+
+            <!-- Example Rows -->
+            <div class="space-y-4">
+              <%= for {example, index} <- Enum.with_index(@synthetic_samples) do %>
           <div class="grid grid-cols-12 gap-4 p-4 border border-gray-200 rounded-lg">
             <!-- Prompt Column -->
             <div class="col-span-4">
@@ -134,22 +170,119 @@
             </div>
           </div>
         <% end %>
-      </div>
+              </div>
+            <% end %>
+
+        <% @current_step == 3 -> %>
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">
+              Upload Communications
+            </h2>
+            <p class="text-gray-600">
+              Upload example communication threads - emails, Slack conversations, SMS, or Discord messages.
+            </p>
+          </div>
+          
+          <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+            <div class="text-5xl mb-4">💬</div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Upload Communication Examples</h3>
+            <p class="text-gray-600 mb-4">Messages, emails, or chat transcripts</p>
+            <button class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              Choose Files
+            </button>
+          </div>
+
+        <% @current_step == 4 -> %>
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">
+              Add Reference Materials
+            </h2>
+            <p class="text-gray-600">
+              Upload reference materials: manuals, procedures, research papers, templates, etc.
+            </p>
+          </div>
+          
+          <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+            <div class="text-5xl mb-4">📚</div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Upload Reference Documents</h3>
+            <p class="text-gray-600 mb-4">Knowledge base materials and documentation</p>
+            <button class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              Choose Files
+            </button>
+          </div>
+
+        <% @current_step == 5 -> %>
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 mb-2">
+              Training Your Assistant
+            </h2>
+            <p class="text-gray-600">
+              We're now training your AI assistant with all the data you've provided.
+            </p>
+          </div>
+          
+          <div class="py-12">
+            <div class="text-center mb-8">
+              <div class="text-6xl mb-4">🤖</div>
+              <h3 class="text-xl font-semibold text-gray-900 mb-2">Training in Progress</h3>
+              <p class="text-gray-600">This may take a few minutes...</p>
+            </div>
+            
+            <div class="max-w-md mx-auto">
+              <div class="space-y-3">
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-gray-600">Stage I: Foundation Training</span>
+                  <span class="text-green-600">✓</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-gray-600">Stage II: Social & Dialog</span>
+                  <span class="text-blue-600">●</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-gray-400">Stage III: Professional Context</span>
+                  <span class="text-gray-300">○</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-gray-400">Stage IV: Generic Instructions</span>
+                  <span class="text-gray-300">○</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-gray-400">Stage V: Personalization</span>
+                  <span class="text-gray-300">○</span>
+                </div>
+              </div>
+            </div>
+          </div>
+      <% end %>
 
       <!-- Footer -->
       <div class="flex justify-between items-center mt-8 pt-6 border-t border-gray-200">
-        <button
-          phx-click="back_step"
-          class="px-6 py-2 text-gray-600 hover:text-gray-900"
-        >
-          Back
-        </button>
-        <button
-          phx-click="next_step"
-          class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Continue
-        </button>
+        <%= if @current_step > 1 do %>
+          <button
+            phx-click="back_step"
+            class="px-6 py-2 text-gray-600 hover:text-gray-900"
+          >
+            Back
+          </button>
+        <% else %>
+          <div></div>
+        <% end %>
+        
+        <%= if @current_step < 5 do %>
+          <button
+            phx-click="next_step"
+            class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Continue
+          </button>
+        <% else %>
+          <button
+            phx-click="finish_training"
+            class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
+            Complete Setup
+          </button>
+        <% end %>
       </div>
     </div>
   </div>

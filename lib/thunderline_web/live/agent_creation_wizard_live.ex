@@ -142,6 +142,35 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
   end
 
   @impl true
+  def handle_event("validate_upload", _params, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :documents, ref)}
+  end
+
+  @impl true
+  def handle_event("upload_files", _params, socket) do
+    uploaded_files =
+      consume_uploaded_entries(socket, :documents, fn %{path: path}, entry ->
+        # For now, just track the file info
+        # In production, you'd save to storage and process
+        {:ok, %{
+          name: entry.client_name,
+          size: entry.client_size,
+          type: entry.client_type
+        }}
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:uploaded_files, uploaded_files)
+     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded successfully!")}
+  end
+
+  @impl true
   def handle_event("back_step", _params, socket) do
     prev_step = max(1, socket.assigns.current_step - 1)
     {:noreply, assign(socket, :current_step, prev_step)}
@@ -270,4 +299,9 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
       }
     ]
   end
+
+  defp error_to_string(:too_large), do: "File is too large (max 50MB)"
+  defp error_to_string(:too_many_files), do: "Too many files (max 10)"
+  defp error_to_string(:not_accepted), do: "File type not supported"
+  defp error_to_string(error), do: "Upload error: #{inspect(error)}"
 end

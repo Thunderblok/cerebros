@@ -56,17 +56,82 @@
             </p>
           </div>
           
-          <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-            <div class="text-5xl mb-4">📄</div>
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">Drag and drop files here</h3>
-            <p class="text-gray-600 mb-4">or click to browse</p>
-            <button class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Choose Files
-            </button>
-            <p class="text-sm text-gray-500 mt-4">
-              Supported formats: PDF, DOC, DOCX, TXT, CSV, JSON, XML, MD
-            </p>
-          </div>
+          <form phx-change="validate_upload" phx-submit="upload_files">
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center" phx-drop-target={@uploads.documents.ref}>
+              <div class="text-5xl mb-4">📄</div>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">Drag and drop files here</h3>
+              <p class="text-gray-600 mb-4">or click to browse</p>
+              
+              <label for={@uploads.documents.ref} class="cursor-pointer">
+                <span class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-block">
+                  Choose Files
+                </span>
+              </label>
+              <.live_file_input upload={@uploads.documents} class="hidden" />
+              
+              <p class="text-sm text-gray-500 mt-4">
+                Supported formats: PDF, DOC, DOCX, TXT, CSV, JSON, XML, MD
+              </p>
+              <p class="text-xs text-gray-400 mt-1">
+                Max file size: 50MB • Max files: 10
+              </p>
+            </div>
+
+            <%!-- Show uploaded files --%>
+            <%= if @uploads.documents.entries != [] do %>
+              <div class="mt-6 space-y-3">
+                <h4 class="font-semibold text-gray-900">Selected Files:</h4>
+                <%= for entry <- @uploads.documents.entries do %>
+                  <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div class="flex items-center gap-3 flex-1">
+                      <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-900"><%= entry.client_name %></p>
+                        <p class="text-xs text-gray-500"><%= Float.round(entry.client_size / 1024, 1) %> KB</p>
+                      </div>
+                    </div>
+                    
+                    <%!-- Progress bar --%>
+                    <div class="flex items-center gap-3">
+                      <%= if entry.progress > 0 && entry.progress < 100 do %>
+                        <div class="w-32 bg-gray-200 rounded-full h-2">
+                          <div class="bg-blue-600 h-2 rounded-full transition-all" style={"width: #{entry.progress}%"}></div>
+                        </div>
+                        <span class="text-xs text-gray-600"><%= entry.progress %>%</span>
+                      <% end %>
+                      
+                      <button
+                        type="button"
+                        phx-click="cancel_upload"
+                        phx-value-ref={entry.ref}
+                        class="text-red-600 hover:text-red-700"
+                      >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <%!-- Show upload errors --%>
+                  <%= for err <- upload_errors(@uploads.documents, entry) do %>
+                    <p class="text-sm text-red-600 mt-1">
+                      <%= error_to_string(err) %>
+                    </p>
+                  <% end %>
+                <% end %>
+              </div>
+            <% end %>
+
+            <%!-- Show any general upload errors --%>
+            <%= for err <- upload_errors(@uploads.documents) do %>
+              <p class="text-sm text-red-600 mt-2">
+                <%= error_to_string(err) %>
+              </p>
+            <% end %>
+          </form>
 
         <% @current_step == 2 -> %>
           <div class="mb-6">
@@ -183,14 +248,41 @@
             </p>
           </div>
           
-          <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-            <div class="text-5xl mb-4">💬</div>
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">Upload Communication Examples</h3>
-            <p class="text-gray-600 mb-4">Messages, emails, or chat transcripts</p>
-            <button class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Choose Files
-            </button>
-          </div>
+          <form phx-change="validate_upload" phx-submit="upload_files">
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center" phx-drop-target={@uploads.documents.ref}>
+              <div class="text-5xl mb-4">💬</div>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">Upload Communication Examples</h3>
+              <p class="text-gray-600 mb-4">Messages, emails, or chat transcripts</p>
+              
+              <label for={@uploads.documents.ref} class="cursor-pointer">
+                <span class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-block">
+                  Choose Files
+                </span>
+              </label>
+              <.live_file_input upload={@uploads.documents} class="hidden" />
+            </div>
+
+            <%= if @uploads.documents.entries != [] do %>
+              <div class="mt-6 space-y-3">
+                <h4 class="font-semibold text-gray-900">Selected Files:</h4>
+                <%= for entry <- @uploads.documents.entries do %>
+                  <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div class="flex items-center gap-3 flex-1">
+                      <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                      </svg>
+                      <p class="text-sm font-medium text-gray-900"><%= entry.client_name %></p>
+                    </div>
+                    <button type="button" phx-click="cancel_upload" phx-value-ref={entry.ref} class="text-red-600 hover:text-red-700">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          </form>
 
         <% @current_step == 4 -> %>
           <div class="mb-6">
@@ -202,14 +294,41 @@
             </p>
           </div>
           
-          <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-            <div class="text-5xl mb-4">📚</div>
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">Upload Reference Documents</h3>
-            <p class="text-gray-600 mb-4">Knowledge base materials and documentation</p>
-            <button class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Choose Files
-            </button>
-          </div>
+          <form phx-change="validate_upload" phx-submit="upload_files">
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center" phx-drop-target={@uploads.documents.ref}>
+              <div class="text-5xl mb-4">📚</div>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">Upload Reference Documents</h3>
+              <p class="text-gray-600 mb-4">Knowledge base materials and documentation</p>
+              
+              <label for={@uploads.documents.ref} class="cursor-pointer">
+                <span class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-block">
+                  Choose Files
+                </span>
+              </label>
+              <.live_file_input upload={@uploads.documents} class="hidden" />
+            </div>
+
+            <%= if @uploads.documents.entries != [] do %>
+              <div class="mt-6 space-y-3">
+                <h4 class="font-semibold text-gray-900">Selected Files:</h4>
+                <%= for entry <- @uploads.documents.entries do %>
+                  <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div class="flex items-center gap-3 flex-1">
+                      <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                      <p class="text-sm font-medium text-gray-900"><%= entry.client_name %></p>
+                    </div>
+                    <button type="button" phx-click="cancel_upload" phx-value-ref={entry.ref} class="text-red-600 hover:text-red-700">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          </form>
 
         <% @current_step == 5 -> %>
           <div class="mb-6">

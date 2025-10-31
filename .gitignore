@@ -37,3 +37,6 @@ npm-debug.log
 
 # Ignore uploaded files in local NFS storage
 /priv/nfs/agents/
+
+# Ignore cloned cerebros repository
+/cerebros-core-algorithm-alpha/

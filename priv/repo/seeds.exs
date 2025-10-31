@@ -12,9 +12,12 @@
 
 alias Thunderline.Accounts.User
 
+# Ensure the repo is started
+_ = Application.ensure_all_started(:thunderline)
+
 # Add mo@okoracle.com to the database
 # Since we don't have a basic create action, we'll insert directly into the repo
-case Thunderline.Repo.insert(%User{email: "mo@okoracle.com"}) do
+case Thunderline.Repo.insert(%User{email: "mo@okoracle.com"}, on_conflict: :nothing) do
   {:ok, user} ->
     IO.puts("✅ User created successfully!")
     IO.puts("   Email: #{user.email}")
@@ -23,3 +26,5 @@ case Thunderline.Repo.insert(%User{email: "mo@okoracle.com"}) do
   {:error, changeset} ->
     IO.puts("❌ Error creating user: #{inspect(changeset)}")
 end
+
+IO.puts("\n📊 Database seeding complete!")

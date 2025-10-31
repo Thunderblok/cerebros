@@ -7,11 +7,43 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    # Start at step 1
+    # Get or create a user for demo purposes (since auth is disabled)
+    # First try direct Repo query to check if user exists
+    import Ecto.Query
+
+    user = case Thunderline.Repo.one(from u in Thunderline.Accounts.User, where: u.email == "demo@thunderline.dev") do
+      nil ->
+        # User doesn't exist, create it
+        Thunderline.Repo.insert!(%Thunderline.Accounts.User{email: "demo@thunderline.dev"}, on_conflict: :nothing)
+        # Query again to get the user
+        Thunderline.Repo.one!(from u in Thunderline.Accounts.User, where: u.email == "demo@thunderline.dev")
+      user ->
+        user
+    end
+
+    # Get the most recent agent or create one
+    agent = case Thunderline.Datasets.Agent
+      |> Ash.Query.filter(user_id == ^user.id)
+      |> Ash.Query.sort(created_at: :desc)
+      |> Ash.Query.limit(1)
+      |> Ash.read() do
+      {:ok, [agent | _]} ->
+        agent
+      _ ->
+        # Create agent with user_id
+        {:ok, agent} = Ash.create(Thunderline.Datasets.Agent, %{
+          name: "New Assistant",
+          user_id: user.id,
+          status: :step1_work_products,
+          current_step: 1
+        })
+        agent
+    end
+
     {:ok,
      socket
      |> assign(:current_step, 1)
-     |> assign(:agent, nil)
+     |> assign(:agent, agent)
      |> assign(:uploaded_files, [])
      |> assign(:synthetic_samples, [])
      |> assign(:selected_samples, [])
@@ -19,6 +51,7 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
      |> assign(:messages, [])
      |> assign(:show_review, false)
      |> assign(:step_data, %{})
+     |> load_uploaded_files_for_step(1)
      |> allow_upload(:documents,
        accept: ~w(.txt .pdf .doc .docx .csv .json .xml .md),
        max_entries: 10,
@@ -156,17 +189,17 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
     agent_id = socket.assigns.agent.id
     current_step = socket.assigns.current_step
     document_type = get_document_type_for_step(current_step)
-    
+
     uploaded_files =
       consume_uploaded_entries(socket, :documents, fn %{path: path}, entry ->
         # Create directory structure: priv/nfs/agents/{agent_id}/{document_type}/
         dest_dir = Path.join(["priv", "nfs", "agents", agent_id, Atom.to_string(document_type)])
         File.mkdir_p!(dest_dir)
-        
+
         # Save file with original name
         dest_path = Path.join(dest_dir, entry.client_name)
         File.cp!(path, dest_path)
-        
+
         # Create database record
         {:ok, doc} = Ash.create(Thunderline.Datasets.AgentDocument, %{
           agent_id: agent_id,
@@ -176,37 +209,65 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
           status: :uploaded,
           is_synthetic: false
         })
-        
-        {:ok, %{
-          id: doc.id,
-          name: entry.client_name,
-          size: entry.client_size,
-          type: entry.client_type,
-          path: dest_path
-        }}
+
+        {:ok, doc}
       end)
 
     {:noreply,
      socket
-     |> assign(:uploaded_files, socket.assigns.uploaded_files ++ uploaded_files)
-     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded successfully to local NFS!")}
+     |> load_uploaded_files_for_step(current_step)
+     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded successfully!")}
   end
 
   @impl true
   def handle_event("back_step", _params, socket) do
     prev_step = max(1, socket.assigns.current_step - 1)
-    {:noreply, assign(socket, :current_step, prev_step)}
+    {:noreply,
+     socket
+     |> assign(:current_step, prev_step)
+     |> load_uploaded_files_for_step(prev_step)}
   end
 
   @impl true
   def handle_event("finish_training", _params, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/dashboard")}
+    # Only redirect if training status shows completion or if there was nothing to train
+    agent_id = socket.assigns.agent.id
+
+    # Check if there are any documents
+    doc_count = Thunderline.Datasets.AgentDocument
+      |> Ash.Query.filter(agent_id == ^agent_id)
+      |> Ash.read!()
+      |> length()
+
+    if doc_count == 0 do
+      {:noreply,
+       socket
+       |> put_flash(:info, "No documents were uploaded. Your assistant has been created but needs training data.")
+       |> push_navigate(to: ~p"/dashboard")}
+    else
+      {:noreply,
+       socket
+       |> put_flash(:info, "Training initiated! Your assistant will be ready shortly.")
+       |> push_navigate(to: ~p"/dashboard")}
+    end
   end
 
   @impl true
   def handle_event("next_step", _params, socket) do
-    next_step = min(5, socket.assigns.current_step + 1)
-    {:noreply, assign(socket, :current_step, next_step)}
+    current_step = socket.assigns.current_step
+    next_step = min(5, current_step + 1)
+
+    # If moving to step 5 (final review), trigger training pipeline
+    socket = if next_step == 5 and current_step == 4 do
+      start_training_pipeline(socket)
+    else
+      socket
+    end
+
+    {:noreply,
+     socket
+     |> assign(:current_step, next_step)
+     |> load_uploaded_files_for_step(next_step)}
   end
 
   # Helper functions
@@ -221,6 +282,23 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
       3 -> :communication
       4 -> :reference
       _ -> :work_product
+    end
+  end
+
+  defp load_uploaded_files_for_step(socket, step) do
+    # Only load files for steps that have file uploads (1, 3, 4)
+    if step in [1, 3, 4] do
+      agent_id = socket.assigns.agent.id
+      document_type = get_document_type_for_step(step)
+
+      uploaded_files =
+        Thunderline.Datasets.AgentDocument
+        |> Ash.Query.filter(agent_id == ^agent_id and document_type == ^document_type and is_synthetic == false)
+        |> Ash.read!()
+
+      assign(socket, :uploaded_files, uploaded_files)
+    else
+      socket
     end
   end
 
@@ -252,31 +330,23 @@ defmodule ThunderlineWeb.AgentCreationWizardLive do
     |> Ash.read!()
   end
 
-  defp start_training_pipeline(agent_id) do
-    # This would trigger your training Lambda functions
-    # For now, we'll just update the status
-    Task.start(fn ->
-      stages = [
-        :stage1_training,
-        :stage2_training,
-        :stage3_training,
-        :stage4_training,
-        :stage5_personalization,
-        :deploying,
-        :ready
-      ]
+  defp start_training_pipeline(socket) do
+    agent_id = socket.assigns.agent.id
 
-      Enum.with_index(stages, fn stage, index ->
-        :timer.sleep(5000)
-        progress = div((index + 1) * 100, length(stages))
+    # Enqueue Oban job to process documents and train with Cerebros
+    case %{agent_id: agent_id}
+         |> Thunderline.Workers.CerebrosTrainingWorker.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        socket
+        |> put_flash(:info, "Training pipeline initiated! Processing your documents...")
+        |> assign(:training_status, "initializing")
 
-        agent = Ash.get!(Thunderline.Datasets.Agent, agent_id)
-        Ash.update!(agent, %{
-          status: stage,
-          training_progress: progress
-        })
-      end)
-    end)
+      {:error, reason} ->
+        socket
+        |> put_flash(:error, "Failed to start training: #{inspect(reason)}")
+        |> assign(:training_status, "error")
+    end
   end
 
   defp training_stages do

@@ -13,11 +13,12 @@ defmodule Thunderline.Datasets.Agent do
     defaults [:read, :destroy]
 
     create :create do
-      accept [:name, :user_id, :status]
+      primary? true
+      accept [:name, :user_id, :status, :current_step]
     end
 
     update :update do
-      accept [:name, :status]
+      accept [:name, :status, :current_step, :training_progress]
     end
 
     read :for_user do

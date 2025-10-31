@@ -27,7 +27,7 @@ config :ash_oban, pro?: false
 config :thunderline, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  queues: [default: 10],
+  queues: [default: 10, cerebros_training: 5],
   repo: Thunderline.Repo,
   plugins: [{Oban.Plugins.Cron, []}]
 

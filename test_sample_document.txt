@@ -1,0 +1,33 @@
+Sample Work Product Document
+
+This is a sample work product document that demonstrates the type of content your AI assistant will learn from.
+
+Project Overview:
+The Thunderline project is an AI-powered platform for creating custom AI assistants. It uses Phoenix LiveView for the frontend and integrates with a Cerebros NAS (Neural Architecture Search) framework for training custom models.
+
+Key Features:
+1. Multi-step wizard interface for easy assistant creation
+2. Document upload support for multiple formats (TXT, PDF, DOCX)
+3. Background job processing with Oban
+4. Text chunking into 512-character segments with overlap
+5. CSV export for training data
+6. Python RPC integration for Cerebros training
+
+Technical Stack:
+- Elixir 1.19+ with Phoenix Framework
+- PostgreSQL database
+- Ash Framework for resource management
+- Oban for job queue
+- Cerebros NAS for neural architecture search
+- Python 3 for ML training
+
+Document Processing Pipeline:
+When you upload documents, the system:
+1. Stores files in priv/nfs/agents/{agent_id}/{type}/
+2. Extracts text based on file type
+3. Chunks text into 512-char segments with 50-char overlap
+4. Converts to CSV format
+5. Enqueues Oban job for processing
+6. Calls Python wrapper for Cerebros training
+
+This allows your AI assistant to learn from your specific work style, communication patterns, and domain expertise.

@@ -40,6 +40,11 @@ defmodule Thunderline.Accounts.User do
   actions do
     defaults [:read]
 
+    create :create do
+      primary? true
+      accept [:email]
+    end
+
     read :get_by_subject do
       description "Get a user by the subject claim in a JWT"
       argument :subject, :string, allow_nil?: false
@@ -49,6 +54,7 @@ defmodule Thunderline.Accounts.User do
 
     read :get_by_email do
       description "Looks up a user by their email"
+      argument :email, :ci_string, allow_nil?: false
       get_by :email
     end
 
